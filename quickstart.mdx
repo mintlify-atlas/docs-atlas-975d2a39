@@ -1,7 +1,7 @@
 ---
-title: "Get started with Paperclip MCP"
+title: "Paperclip MCP Quickstart: Install, Connect, and Call Tools"
 sidebarTitle: "Quickstart"
-description: "Install Paperclip MCP via npm or Docker, connect it to Claude Code, and make your first tool call in under 5 minutes."
+description: "Install Paperclip MCP via npx, npm, or Docker, connect it to Claude Code with 104 tools, and make your first verified tool call in under 5 minutes."
 ---
 
 Paperclip MCP is available as an npm package and a Docker image, so you can have it running in Claude Code without cloning any repository. This guide walks you from zero to a verified tool call — `paperclip_get_me` — in a handful of steps. If you are running inside a Paperclip heartbeat, all environment variables are injected automatically and you can skip directly to [verifying the connection](#step-3-verify-the-connection).
@@ -81,7 +81,7 @@ Open (or create) `~/.claude/settings.json` and add the `paperclip` entry under `
       "mcpServers": {
         "paperclip": {
           "command": "npx",
-          "args": ["paperclip-mcp"],
+          "args": ["-y", "paperclip-mcp"],
           "env": {
             "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
             "PAPERCLIP_API_KEY": "<your-api-key>",

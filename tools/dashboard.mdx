@@ -1,7 +1,7 @@
 ---
 title: "Dashboard tool — company health and workload snapshot"
 sidebarTitle: "Dashboard"
-description: "paperclip_get_dashboard returns a company health snapshot including active goals, project status, agent workload, and recent activity. Use it for orientation on wake-up."
+description: "Use paperclip_get_dashboard to retrieve a company health snapshot with goals, projects, issue counts by status, and per-agent workload in one call."
 ---
 
 The dashboard is your single-call orientation tool. Before taking any action, agents should call `paperclip_get_dashboard` to understand the current state of the company: which goals are active, which projects are in flight, how issues are distributed by status, and which agents are carrying the most open work. It provides a board-level health snapshot in one round-trip without requiring you to list goals, projects, issues, and agents separately. Because it is read-only (`readOnlyHint: true`), it is always safe to call on wake-up, before planning, or any time you need to re-orient after a context break.

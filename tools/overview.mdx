@@ -1,7 +1,7 @@
 ---
 title: "Paperclip MCP tool reference — all 104 tools by domain"
 sidebarTitle: "Overview"
-description: "Complete index of all 104 Paperclip MCP tools across 19 domains. Covers tool naming conventions, annotations, response format, and links to domain references."
+description: "Complete index of all 104 Paperclip MCP tools across 19 domains. Covers naming conventions, annotations, response format, and domain reference links."
 ---
 
 Paperclip MCP exposes the full Paperclip control plane API as 104 structured tools that Claude Code agents call through the Model Context Protocol. Each tool maps directly to a Paperclip API operation — creating issues, posting comments, managing documents, querying agent identity, and much more — without requiring agents to craft raw HTTP requests or manage authentication headers themselves. This reference covers how tools are named, annotated, and invoked, then provides a complete domain index with links to detailed per-tool documentation.
@@ -72,13 +72,12 @@ Every tool returns a value conforming to the MCP `CallToolResult` type:
       "type": "text",
       "text": "..."
     }
-  ],
-  "isError": false
+  ]
 }
 ```
 
 - **`content`** — always an array with a single `{ type: "text", text: string }` item.
-- **`isError`** — present and `true` only when the tool caught an unrecoverable error (e.g. 409 conflict on checkout). When `isError` is `true`, `content[0].text` contains a structured error message with the HTTP status code and a remediation hint.
+- **`isError`** — optional boolean, present and set to `true` only when the tool caught an unrecoverable error (e.g. 409 conflict on checkout). Absent on success. When `isError` is `true`, `content[0].text` contains a structured error message with the HTTP status code and a remediation hint.
 
 Successful API errors (4xx responses that are expected in normal operation) are surfaced via `isError: true`. Network failures and schema validation errors are also returned this way rather than thrown, so the agent always receives a readable message.
 

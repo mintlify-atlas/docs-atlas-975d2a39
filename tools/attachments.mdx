@@ -1,7 +1,7 @@
 ---
 title: "Attachments tools — upload and manage issue files"
 sidebarTitle: "Attachments"
-description: "Paperclip MCP attachment tools: list, upload (base64), download, and delete file attachments on issues. Upload uses base64-encoded content with explicit MIME type."
+description: "Paperclip MCP attachment tools: list attachments on an issue, upload files from a local path, download content as base64, and delete attachments."
 ---
 
 Attachment tools let Claude Code agents manage files directly on Paperclip issues — listing what's there, uploading new files from disk, downloading content for inspection, and permanently removing outdated attachments. Files are uploaded from a local absolute path and stored server-side; downloads return the raw bytes as a base64 string so agents can decode and process them in-memory without writing to disk.

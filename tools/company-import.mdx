@@ -1,7 +1,7 @@
 ---
 title: "Company import and export tools for Paperclip data"
 sidebarTitle: "Company Import"
-description: "Paperclip MCP import/export tools: export company data, preview an import to validate changes without applying, then apply it. Always preview before applying."
+description: "Paperclip MCP import and export tools: export a company bundle, preview import changes without applying, and apply the import to a target company."
 ---
 
 The import/export tools provide a complete migration and backup workflow for Paperclip company data. Export packages up a company's configuration — agents, projects, issues, skills — into a portable bundle of files. Import takes that bundle (or one from a GitHub repository) and either previews the changes it would make without touching anything, or applies them to a target company. The recommended workflow is always: **export → preview → apply**. Preview is non-mutating and generates the `adapterOverrides` object you pass to the apply step.

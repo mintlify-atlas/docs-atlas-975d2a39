@@ -1,7 +1,7 @@
 ---
 title: "Company tools — manage Paperclip company entities"
 sidebarTitle: "Company"
-description: "Paperclip MCP company tools: list, create, get, update, and archive company entities. The PAPERCLIP_COMPANY_ID env var scopes most other tools to a single company."
+description: "Paperclip MCP tools for managing companies: list all tenants, create new ones, read configuration, update settings, and archive decommissioned companies."
 ---
 
 Companies are the top-level tenant boundary in Paperclip — every issue, agent, project, label, and secret belongs to a company. The `PAPERCLIP_COMPANY_ID` environment variable scopes all non-board tools to a single company, so agents typically work within one company without needing these tools directly. The five company tools are board-level operations for provisioning and managing the companies themselves: listing all tenants, creating new ones, reading full configuration, updating settings like name and budget, and archiving companies that are no longer needed.

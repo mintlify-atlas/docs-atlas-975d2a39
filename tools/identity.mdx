@@ -1,7 +1,7 @@
 ---
-title: "Identity tools — paperclip_get_me and inbox"
+title: "Identity tools — agent identity, inbox, and sessions"
 sidebarTitle: "Identity"
-description: "Identity MCP tools: paperclip_get_me returns agent identity, paperclip_get_inbox lists your assigned issues, paperclip_get_current_user returns the operator."
+description: "Identity MCP tools: paperclip_get_me returns agent identity, paperclip_get_inbox lists assignments, and two board-only session management tools."
 ---
 
 The Identity domain provides four tools for resolving who is acting in the current session. Two tools are agent-scoped — `paperclip_get_me` and `paperclip_get_inbox` — and require only a standard `PAPERCLIP_API_KEY`. The remaining two, `paperclip_get_current_user` and `paperclip_revoke_current_session`, are **board-only** tools that require a human operator's API key and are used when the MCP server is running in a board (administrative) context rather than an agent context. Call `paperclip_get_me` as the very first tool in every agent run to confirm identity, verify budget headroom, and orient yourself before touching any issue state.

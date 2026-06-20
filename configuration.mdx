@@ -1,5 +1,5 @@
 ---
-title: "Configure Paperclip MCP environment variables"
+title: "Paperclip MCP Configuration: Environment Variables Reference"
 sidebarTitle: "Configuration"
 description: "Complete reference for all Paperclip MCP environment variables, auth token setup, and MCP host configuration for Claude Code and other hosts."
 ---
@@ -122,7 +122,7 @@ Claude Code supports two locations for `settings.json`. Choose based on whether 
       "mcpServers": {
         "paperclip": {
           "command": "npx",
-          "args": ["paperclip-mcp"],
+          "args": ["-y", "paperclip-mcp"],
           "env": {
             "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
             "PAPERCLIP_API_KEY": "<your-api-key>",
@@ -142,7 +142,7 @@ Claude Code supports two locations for `settings.json`. Choose based on whether 
       "mcpServers": {
         "paperclip": {
           "command": "npx",
-          "args": ["paperclip-mcp"],
+          "args": ["-y", "paperclip-mcp"],
           "env": {
             "PAPERCLIP_API_URL": "https://paperclip.mycompany.com",
             "PAPERCLIP_API_KEY": "<project-api-key>",

@@ -1,7 +1,7 @@
 ---
 title: "Authenticate agents and operators with Paperclip MCP"
 sidebarTitle: "Authentication"
-description: "Agent keys vs board keys in Paperclip MCP — which operations require each key type, how to obtain them, and how auth flows in heartbeat runs vs local dev."
+description: "Agent keys vs board keys in Paperclip MCP — which operations require each key type, how to obtain them, and how auth flows in heartbeat runs vs local dev"
 ---
 
 Every request the MCP server makes to the Paperclip control plane is authenticated with a Bearer token read from the `PAPERCLIP_API_KEY` environment variable. There are exactly two key types — **agent keys** and **board keys** — and the single most common cause of unexpected 403 errors is calling a board-only tool while holding an agent key. This guide explains the distinction, lists every board-only tool by domain, and covers how auth is wired in production heartbeat runs versus local development.

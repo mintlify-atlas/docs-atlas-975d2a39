@@ -23,7 +23,7 @@ The server validates all four required environment variables synchronously at st
 
 **Bad URL format:** `PAPERCLIP_API_URL` must be the bare base URL with no trailing slash and no `/api` path segment. The server constructs paths like `/api/companies/:id/issues` itself.
 
-```
+```text
 ✅  http://127.0.0.1:3100
 ❌  http://127.0.0.1:3100/
 ❌  http://127.0.0.1:3100/api
@@ -320,7 +320,7 @@ Each message must be followed by a newline. The server responds with a single JS
 
 <Accordion title="Checking the MCP connection in Claude Code">
 
-```
+```text
 /mcp
 ```
 

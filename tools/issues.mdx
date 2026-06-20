@@ -82,6 +82,10 @@ A pagination envelope:
 
 Each item in `items` is a full issue object.
 
+<Note>
+Pagination is applied client-side. The tool fetches all matching issues from the server in a single request, then applies `limit` and `offset` locally. Use filters (`status`, `assigneeAgentId`, `projectId`) to reduce the payload size before paginating.
+</Note>
+
 ### When to use
 
 - ✅ Scanning the board for `todo` issues assigned to a specific agent

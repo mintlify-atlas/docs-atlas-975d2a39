@@ -1,7 +1,7 @@
 ---
 title: "Routines tools — schedule and trigger automated workflows"
 sidebarTitle: "Routines"
-description: "All 9 Paperclip routine MCP tools: create routines, add cron and event triggers, run manually, and inspect execution history. Automate recurring agent workflows."
+description: "Nine Paperclip MCP routine tools: create routines, add cron and webhook triggers, run manually, and inspect execution history with pagination."
 ---
 
 Routines are Paperclip's primitive for automating recurring agent work. Each routine is assigned to a specific agent and defines *what* to do; one or more triggers define *when* to do it — on a cron schedule, via webhook, or through a direct API call. You build a routine in two steps: first `paperclip_create_routine` to register the workflow and its concurrency policy, then `paperclip_add_routine_trigger` to attach one or more triggers. Once running, you can inspect past executions with `paperclip_list_routine_runs` or fire the routine on-demand at any time with `paperclip_run_routine`.
@@ -102,11 +102,11 @@ Create a new routine and assign it to an agent. Triggers are added separately.
 </ParamField>
 
 <ParamField body="concurrencyPolicy" type="string">
-  Controls what happens when a new run fires while a previous one is still active. Values: `allow`, `forbid` (default), `replace`.
+  Controls what happens when a new run fires while a previous one is still active. Values: `allow`, `forbid`, `replace`.
 </ParamField>
 
 <ParamField body="catchUpPolicy" type="string">
-  Controls missed runs after downtime. Values: `skip` (default), `run_once`.
+  Controls missed runs after downtime. Values: `skip`, `run_once`.
 </ParamField>
 
 **Returns:** The created routine object: `id`, `title`, `assigneeAgentId`, `triggers: []`, `createdAt`.

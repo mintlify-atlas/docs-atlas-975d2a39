@@ -10,30 +10,32 @@ Paperclip MCP is a thin adapter that bridges the [Model Context Protocol](https:
 
 The adapter sits between the MCP host and the Paperclip API. All communication with the host flows over stdio as JSON-RPC; all communication with the API flows over HTTP with a bearer token and optional run ID header.
 
-```
-┌──────────────────────────────────────┐
-│              MCP Host                │
-│  (Claude Code / other MCP client)    │
-└──────────────┬───────────────────────┘
-               │ MCP stdio (JSON-RPC)
-               │ tools/list · tools/call
-┌──────────────▼───────────────────────┐
-│         paperclip-mcp server         │
-│                                      │
-│  src/index.ts       — entry point    │
-│  src/tools/index.ts — registry       │
-│  src/tools/*.ts     — handlers       │
-│  src/client.ts      — HTTP client    │
-│  src/auth.ts        — auth config    │
-│  src/errors.ts      — error type     │
-└──────────────┬───────────────────────┘
-               │ HTTP/HTTPS
-               │ Authorization: Bearer <token>
-               │ X-Paperclip-Run-Id: <run-id>
-┌──────────────▼───────────────────────┐
-│      Paperclip control plane API     │
-│         ($PAPERCLIP_API_URL)         │
-└──────────────────────────────────────┘
+```text
+┌──────────────────────────────────────────┐
+│                 MCP Host                 │
+│   (Claude Code / other MCP client)       │
+└───────────────────┬──────────────────────┘
+                    │ MCP stdio (JSON-RPC)
+                    │ tools/list · tools/call
+┌───────────────────▼──────────────────────┐
+│           paperclip-mcp server           │
+│                                          │
+│  src/index.ts            — entry point   │
+│  src/tools/index.ts      — registry      │
+│  src/tools/*.ts          — handlers      │
+│  src/tools/validation.ts — helpers       │
+│  src/client.ts           — HTTP client   │
+│  src/auth.ts             — auth config   │
+│  src/errors.ts           — error type    │
+│  src/types.ts            — shared types  │
+└───────────────────┬──────────────────────┘
+                    │ HTTP/HTTPS
+                    │ Authorization: Bearer <token>
+                    │ X-Paperclip-Run-Id: <run-id>
+┌───────────────────▼──────────────────────┐
+│       Paperclip control plane API        │
+│           ($PAPERCLIP_API_URL)           │
+└──────────────────────────────────────────┘
 ```
 
 ## Entry flow
@@ -120,11 +122,11 @@ These two interfaces are the contract every tool module must satisfy. They are d
 
 ```typescript
 interface ToolAnnotations {
-  title?: string;
-  readOnlyHint?: boolean;     // true → tool never modifies state
-  destructiveHint?: boolean;  // true → tool may have irreversible side-effects
-  idempotentHint?: boolean;   // true → repeated calls with same args are safe
-  openWorldHint?: boolean;    // true → tool may interact with external services
+  title?: string;              // optional human-readable label for the tool
+  readOnlyHint?: boolean;      // true → tool never modifies state
+  destructiveHint?: boolean;   // true → tool may have irreversible side-effects
+  idempotentHint?: boolean;    // true → repeated calls with same args are safe
+  openWorldHint?: boolean;     // true → tool may interact with external services
 }
 
 interface ToolDefinition {
@@ -177,7 +179,7 @@ The `tools/call` dispatch sequence:
 
 Environment variables are injected by the Paperclip runtime before the process starts. `src/auth.ts` reads and validates them synchronously at startup — there is no deferred validation.
 
-```
+```text
 Paperclip runtime
       │
       ├─ injects PAPERCLIP_API_KEY  (short-lived JWT per run)

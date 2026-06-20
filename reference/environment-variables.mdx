@@ -1,5 +1,5 @@
 ---
-title: "Paperclip MCP environment variable reference"
+title: "Paperclip MCP environment variables configuration reference"
 sidebarTitle: "Environment Variables"
 description: "All six Paperclip MCP environment variables — required and optional — with format requirements, startup validation behavior, and local dev examples."
 ---
@@ -61,7 +61,7 @@ In production, `PAPERCLIP_RUN_ID` is injected automatically by the Paperclip run
 
 Controls the `AbortSignal.timeout` value applied to every `fetch` call in `PaperclipClient`. If a request takes longer than this many milliseconds, the signal fires and `handleApiError` returns an `isError: true` result with a timeout message.
 
-```
+```text
 Default: 30000 (30 seconds)
 Minimum: any positive integer
 ```

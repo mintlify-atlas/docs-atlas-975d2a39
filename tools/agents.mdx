@@ -262,10 +262,6 @@ Update an agent's governance permissions.
 
 ## paperclip_pause_agent
 
-<Warning>
-**Board-only.** Requires a board (human) API key.
-</Warning>
-
 Pause an agent, preventing it from starting new heartbeat runs. The current run, if any, completes before the pause takes effect.
 
 <ParamField body="agentId" type="string" required>
@@ -292,10 +288,6 @@ Pause an agent, preventing it from starting new heartbeat runs. The current run,
 ---
 
 ## paperclip_resume_agent
-
-<Warning>
-**Board-only.** Requires a board (human) API key.
-</Warning>
 
 Resume a paused agent, re-enabling scheduled and on-demand heartbeat runs.
 

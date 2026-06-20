@@ -1,7 +1,7 @@
 ---
-title: "Labels tools — manage issue labels in Paperclip"
+title: "Label tools — list and create Paperclip issue labels"
 sidebarTitle: "Labels"
-description: "Paperclip MCP label tools: paperclip_list_labels retrieves all company labels, paperclip_create_label creates a new label with a name and hex color."
+description: "Paperclip MCP label tools: list all company labels to build a name-to-UUID cache, and create new labels with a name and optional hex color."
 ---
 
 Labels in Paperclip are company-wide taxonomy entries — each label has a name, an optional hex color, and a UUID. They can be attached to issues via the `labelIds` field when creating or updating an issue, making them the primary mechanism for categorizing work. The two label tools cover the full lifecycle: list existing labels to build a name-to-UUID cache, and create new labels when a required taxonomy entry is missing.
