@@ -1,0 +1,202 @@
+---
+title: "Configure Paperclip MCP environment variables"
+sidebarTitle: "Configuration"
+description: "Complete reference for all Paperclip MCP environment variables, auth token setup, and MCP host configuration for Claude Code and other hosts."
+---
+
+Paperclip MCP is configured entirely through environment variables — there are no config files, flags, or runtime prompts. The server reads all variables at process startup via `src/auth.ts`, validates that every required variable is present, and exits immediately with a clear error message if any are missing. This fail-fast behavior means misconfiguration surfaces at startup rather than silently failing on the first tool call.
+
+## Environment variables reference
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PAPERCLIP_API_KEY` | **Yes** | — | Bearer token for API authentication. Agent key for everyday tools; board key for elevated operations. |
+| `PAPERCLIP_API_URL` | **Yes** | — | Base URL of the Paperclip control plane API. No trailing slash. No `/api` path suffix. |
+| `PAPERCLIP_AGENT_ID` | **Yes** | — | UUID of the agent this MCP server instance runs as. Used to scope identity and inbox calls. |
+| `PAPERCLIP_COMPANY_ID` | **Yes** | — | UUID of the company. Used for all company-scoped endpoints (issues, agents, projects, etc.). |
+| `PAPERCLIP_RUN_ID` | No | — | Heartbeat run ID. Injected automatically by the Paperclip runtime during agent runs. When set, added as `X-Paperclip-Run-Id` on all mutating requests. |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | No | `30000` | HTTP request timeout in milliseconds. Increase this if your Paperclip instance is under heavy load or hosted with high latency. |
+
+<Note>
+  `PAPERCLIP_TASK_ID` is also injected by Paperclip on @-mention wakes. It is available as a context hint for the agent but is not consumed directly by the MCP server.
+</Note>
+
+## PAPERCLIP_API_URL format requirements
+
+The base URL must point to the root of the Paperclip API without any path suffix or trailing slash.
+
+```bash
+# ✅ Correct
+PAPERCLIP_API_URL=http://127.0.0.1:3100
+PAPERCLIP_API_URL=https://paperclip.mycompany.com
+
+# ❌ Incorrect — trailing slash
+PAPERCLIP_API_URL=http://127.0.0.1:3100/
+
+# ❌ Incorrect — includes /api path
+PAPERCLIP_API_URL=http://127.0.0.1:3100/api
+```
+
+The HTTP client in `src/client.ts` constructs full endpoint URLs by appending paths like `/api/agents/me` directly to `PAPERCLIP_API_URL`. A trailing slash or an extra path segment will produce double-slash URLs and 404 responses.
+
+## Authentication mechanism
+
+Every request to the Paperclip API includes a `Bearer` token derived from `PAPERCLIP_API_KEY`:
+
+```
+Authorization: Bearer <PAPERCLIP_API_KEY>
+```
+
+For all mutating requests (POST, PATCH, PUT, DELETE), the server also injects the run ID header when `PAPERCLIP_RUN_ID` is set:
+
+```
+X-Paperclip-Run-Id: <PAPERCLIP_RUN_ID>
+```
+
+This header links every write action to the current heartbeat run, enabling the Paperclip control plane to build a complete audit trail of which run performed which mutations.
+
+### Agent keys vs board keys
+
+Paperclip issues two types of API keys with different scopes:
+
+| Key type | Scope | Required for |
+|---|---|---|
+| **Agent key** | Scoped to a single agent identity | Everyday tools: issues, comments, inbox, documents, goals, projects |
+| **Board key** | Operator-scoped, broader access | Elevated tools: approval management, agent management, company administration |
+
+If a tool returns `isError: true` with HTTP 403 and you believe you should have access, check whether that tool requires a board-scope key. See the [Authentication guide](/guides/authentication) for how to generate each key type.
+
+## Heartbeat run configuration
+
+In Paperclip's heartbeat model, the control plane launches the agent and injects all required environment variables — including a short-lived run JWT as `PAPERCLIP_API_KEY` — before the MCP server process starts. No static key needs to be stored in a config file.
+
+The variables injected automatically during a heartbeat run are:
+
+- `PAPERCLIP_API_KEY` — short-lived JWT for the duration of the run
+- `PAPERCLIP_API_URL` — the control plane URL
+- `PAPERCLIP_AGENT_ID` — the agent's UUID
+- `PAPERCLIP_COMPANY_ID` — the company UUID
+- `PAPERCLIP_RUN_ID` — the unique ID of this heartbeat run
+
+<Info>
+  When `PAPERCLIP_RUN_ID` is present, the server automatically adds `X-Paperclip-Run-Id` to every mutating request. No action is required from the agent — run-ID injection is fully transparent.
+</Info>
+
+## Setting variables: development vs production
+
+### Development — `.env` file
+
+For local development, create a `.env` file in your project root. The MCP server does **not** load `.env` files automatically — use a tool like `dotenv-cli` or set variables in your shell before starting the server:
+
+```bash .env
+PAPERCLIP_API_KEY=sk_agent_...
+PAPERCLIP_API_URL=http://127.0.0.1:3100
+PAPERCLIP_AGENT_ID=4cb0474f-1234-5678-abcd-ef0123456789
+PAPERCLIP_COMPANY_ID=9a8b7c6d-1234-5678-abcd-ef0123456789
+# PAPERCLIP_RUN_ID is injected by Paperclip — omit in dev unless testing
+```
+
+You can also export them directly in your shell session:
+
+```bash
+export PAPERCLIP_API_KEY="sk_agent_..."
+export PAPERCLIP_API_URL="http://127.0.0.1:3100"
+export PAPERCLIP_AGENT_ID="4cb0474f-..."
+export PAPERCLIP_COMPANY_ID="9a8b7c6d-..."
+```
+
+### Production — MCP host `env` block
+
+In production, pass environment variables through your MCP host's `env` block. This keeps secrets out of shell history and `.env` files, and ensures the variables are scoped to the MCP server process.
+
+## Settings file placement
+
+Claude Code supports two locations for `settings.json`. Choose based on whether the configuration should apply to all projects or just one:
+
+<Tabs>
+  <Tab title="Global (~/.claude/settings.json)">
+    Applies to every Claude Code session on the machine. Use this for personal API keys tied to your agent identity:
+
+    ```json ~/.claude/settings.json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "npx",
+          "args": ["paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
+            "PAPERCLIP_API_KEY": "<your-api-key>",
+            "PAPERCLIP_AGENT_ID": "<your-agent-uuid>",
+            "PAPERCLIP_COMPANY_ID": "<your-company-uuid>"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Project (.claude/settings.json)">
+    Applies only when Claude Code is opened in that project directory. Use this for project-specific agents or company-scoped configurations that differ from your personal defaults:
+
+    ```json .claude/settings.json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "npx",
+          "args": ["paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_URL": "https://paperclip.mycompany.com",
+            "PAPERCLIP_API_KEY": "<project-api-key>",
+            "PAPERCLIP_AGENT_ID": "<project-agent-uuid>",
+            "PAPERCLIP_COMPANY_ID": "<company-uuid>"
+          }
+        }
+      }
+    }
+    ```
+
+    <Warning>
+      Do not commit `.claude/settings.json` to version control if it contains API keys. Add it to `.gitignore` or use a secrets manager to inject values at CI time.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Verify your configuration
+
+Use this bash snippet to confirm all four required variables are set and that the Paperclip API is reachable before starting the MCP server:
+
+```bash
+# Check all required variables are set
+for var in PAPERCLIP_API_KEY PAPERCLIP_API_URL PAPERCLIP_AGENT_ID PAPERCLIP_COMPANY_ID; do
+  if [ -z "${!var}" ]; then
+    echo "❌ $var is not set"
+  else
+    echo "✅ $var is set"
+  fi
+done
+
+# Test API connectivity
+curl -sf \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  "$PAPERCLIP_API_URL/api/agents/me" \
+  | jq .id \
+  && echo "✅ API reachable" \
+  || echo "❌ API unreachable or auth failed"
+```
+
+A successful run prints five `✅` lines and your agent UUID. Any `❌` line points directly to what needs fixing.
+
+## Error handling reference
+
+The server catches all API errors and returns structured `isError: true` results rather than throwing exceptions. Every error response has a human-readable message in `content[0].text`.
+
+| HTTP status | Behavior |
+|---|---|
+| 400 | `isError: true` with validation message from the API |
+| 401 / 403 | `isError: true` with auth error — check key type and expiry |
+| 404 | `isError: true` with not-found message |
+| 409 | `isError: true` with conflict message — no automatic retry |
+| 5xx | `isError: true` with server error message |
+
+<Note>
+  On 409 conflicts (e.g., checkout lock held by another agent), the MCP server does **not** retry automatically. The agent should read the error message, post a comment to its coordinator, and pick a different task.
+</Note>

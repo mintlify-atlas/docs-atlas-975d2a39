@@ -1,0 +1,277 @@
+---
+title: "Company import and export tools for Paperclip data"
+sidebarTitle: "Company Import"
+description: "Paperclip MCP import/export tools: export company data, preview an import to validate changes without applying, then apply it. Always preview before applying."
+---
+
+The import/export tools provide a complete migration and backup workflow for Paperclip company data. Export packages up a company's configuration — agents, projects, issues, skills — into a portable bundle of files. Import takes that bundle (or one from a GitHub repository) and either previews the changes it would make without touching anything, or applies them to a target company. The recommended workflow is always: **export → preview → apply**. Preview is non-mutating and generates the `adapterOverrides` object you pass to the apply step.
+
+<Warning>
+  All three tools are **board-only** — they require a board (human-user) API key. Agent API keys receive a `403 Forbidden` response. Always run `paperclip_preview_company_import` before `paperclip_apply_company_import` to understand exactly what will change.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="Export Company" icon="file-export" href="#paperclip_export_company">
+    Package company data into a portable bundle
+  </Card>
+  <Card title="Preview Import" icon="eye" href="#paperclip_preview_company_import">
+    Validate import changes without applying them
+  </Card>
+  <Card title="Apply Import" icon="file-import" href="#paperclip_apply_company_import">
+    Apply a validated import bundle to a company
+  </Card>
+</CardGroup>
+
+---
+
+## paperclip_export_company
+
+Export a company's configuration as a structured bundle of files. The bundle includes selected resource types — company metadata, agent configurations, projects, issues, and skills — and can be used as the source for a subsequent import.
+
+<ParamField path="companyId" type="string" required>
+  Company UUID to export.
+</ParamField>
+
+<ParamField path="include" type="object" required>
+  Controls which resource types are included in the export bundle. All fields are booleans with the following defaults:
+
+  | Field | Default | Description |
+  |-------|---------|-------------|
+  | `company` | `true` | Include the company metadata file (`COMPANY.md`) |
+  | `agents` | `true` | Include all agent configuration files |
+  | `projects` | `false` | Include project records |
+  | `issues` | `false` | Include issue records |
+  | `skills` | `false` | Include company skill definitions |
+</ParamField>
+
+<ParamField path="skills" type="string[]">
+  Filter the export to specific skill IDs. Omit to include all skills (when `include.skills` is `true`).
+</ParamField>
+
+<ParamField path="projects" type="string[]">
+  Filter the export to specific project IDs. Omit to include all projects.
+</ParamField>
+
+<ParamField path="issues" type="string[]">
+  Filter the export to specific issue IDs. Omit to include all issues.
+</ParamField>
+
+<ParamField path="projectIssues" type="string[]">
+  Project IDs whose issues should be included in the export, regardless of the `issues` filter.
+</ParamField>
+
+<ParamField path="expandReferencedSkills" type="boolean">
+  When `true`, transitive skill references are resolved and added to the export bundle automatically.
+</ParamField>
+
+**Returns:** Export bundle (JSON only): `{ rootPath, manifest, files (map of path → content), paperclipExtensionPath, warnings }`. The `files` map can be very large — the response is truncated at 25,000 characters. Use narrower `include` flags or ID filters to reduce bundle size.
+
+**Usage notes:**
+- Use to create a portable snapshot of a company's configuration for backup, migration, or cloning.
+- Enable `include.projects` and `include.issues` only when you need to migrate data beyond agent configuration.
+- To apply the exported bundle to another company, follow up with `paperclip_preview_company_import` then `paperclip_apply_company_import`.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+| 404  | Company not found | Verify the ID with `paperclip_list_companies` |
+
+```json
+{
+  "tool": "paperclip_export_company",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000",
+    "include": {
+      "company": true,
+      "agents": true,
+      "projects": false,
+      "issues": false,
+      "skills": true
+    },
+    "expandReferencedSkills": true
+  }
+}
+```
+
+---
+
+## paperclip_preview_company_import
+
+Preview what a company import would change — without applying any changes. The preview report shows which agents, projects, issues, and skills would be inserted or updated, along with any warnings and the `adapterOverrides` object you should pass to the apply step.
+
+<Note>
+  The preview is **non-mutating** — no records are created, updated, or deleted. It is safe to call repeatedly as you refine your import parameters.
+</Note>
+
+<ParamField path="companyId" type="string" required>
+  Target company UUID for the import preview. Must match `target.companyId`.
+</ParamField>
+
+<ParamField path="source" type="object" required>
+  Bundle source — one of two shapes:
+
+  **Inline bundle** (`type: "inline"`):
+  - `rootPath` (string) — Root path key of the bundle (e.g. `my-company`)
+  - `files` (object) — Map of relative file paths to their string contents
+
+  **GitHub bundle** (`type: "github"`):
+  - `url` (string) — GitHub repository URL (e.g. `https://github.com/org/repo`)
+</ParamField>
+
+<ParamField path="include" type="object" required>
+  Which resource types to consider during the preview: `company`, `agents`, `projects`, `issues`, `skills` (booleans).
+</ParamField>
+
+<ParamField path="target" type="object" required>
+  Import destination: `{ mode: "existing_company" | "new_company", companyId: string }`. The `companyId` must match the top-level `companyId` parameter.
+</ParamField>
+
+<ParamField path="agents" type='"all" | string[]'>
+  Which agents to import. Use `"all"` (default) or an array of agent URL keys to import a subset.
+</ParamField>
+
+<ParamField path="collisionStrategy" type='"rename" | "skip" | "replace"'>
+  How to handle name/key collisions with existing records:
+  - `rename` (default) — Append a suffix to the incoming name
+  - `skip` — Leave the existing record unchanged
+  - `replace` — Overwrite the existing record
+</ParamField>
+
+<ParamField path="selectedFiles" type="string[]">
+  Subset of file paths from the bundle to process. Omit to process all files in the bundle.
+</ParamField>
+
+**Returns:** Preview report (JSON only): `{ source, target, agents, projects, issues, skills, warnings, adapterOverrides }`. Non-mutating — no changes are applied. The `adapterOverrides` field from this response should be passed directly to `paperclip_apply_company_import`.
+
+**Usage notes:**
+- Always run preview before apply. The preview confirms which records will change and surfaces any conflicts.
+- Copy the `adapterOverrides` from the preview response into the apply call to ensure adapters are configured correctly.
+- Use `selectedFiles` to focus on a subset of the bundle when troubleshooting specific file conflicts.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 400  | Invalid bundle | Check source files and `rootPath` |
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+| 404  | Company not found | Verify the ID with `paperclip_list_companies` |
+
+```json
+{
+  "tool": "paperclip_preview_company_import",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000",
+    "source": {
+      "type": "inline",
+      "rootPath": "acme-corp",
+      "files": {
+        "acme-corp/COMPANY.md": "# Acme Corp\n..."
+      }
+    },
+    "include": {
+      "company": true,
+      "agents": true,
+      "projects": false,
+      "issues": false,
+      "skills": false
+    },
+    "target": {
+      "mode": "existing_company",
+      "companyId": "00000000-0000-0000-0000-000000000000"
+    },
+    "collisionStrategy": "rename"
+  }
+}
+```
+
+---
+
+## paperclip_apply_company_import
+
+Apply a company import bundle to a target company. This is the final step of the import workflow — always run `paperclip_preview_company_import` first and pass the returned `adapterOverrides` here.
+
+<Warning>
+  This tool has `destructiveHint: true`. Applying an import **writes new records** to the target company. Always preview first with `paperclip_preview_company_import` to understand exactly what will be inserted or overwritten before calling apply.
+</Warning>
+
+<ParamField path="companyId" type="string" required>
+  Target company UUID to apply the import into. Must match `target.companyId`.
+</ParamField>
+
+<ParamField path="source" type="object" required>
+  Bundle source — same shape as preview: `{ type: "inline", rootPath, files }` or `{ type: "github", url }`.
+</ParamField>
+
+<ParamField path="include" type="object" required>
+  Which resource types to apply: `company`, `agents`, `projects`, `issues`, `skills` (booleans).
+</ParamField>
+
+<ParamField path="target" type="object" required>
+  Import destination: `{ mode: "existing_company" | "new_company", companyId: string }`. Must match top-level `companyId`.
+</ParamField>
+
+<ParamField path="agents" type='"all" | string[]'>
+  Which agents to import. `"all"` (default) or an array of agent URL keys.
+</ParamField>
+
+<ParamField path="collisionStrategy" type='"rename" | "skip" | "replace"'>
+  Collision handling strategy — must match the strategy used during preview: `rename` (default), `skip`, or `replace`.
+</ParamField>
+
+<ParamField path="selectedFiles" type="string[]">
+  Subset of file paths from the bundle to apply. Omit to apply all files.
+</ParamField>
+
+<ParamField path="adapterOverrides" type="object">
+  Adapter-specific overrides map from the preview step. Pass the `adapterOverrides` value returned by `paperclip_preview_company_import` directly here to ensure adapters are configured consistently.
+</ParamField>
+
+**Returns:** Import result counts (JSON only): `{ insertedAgents, insertedProjects, insertedIssues, insertedSkills, warnings }`.
+
+**Usage notes:**
+- Always run `paperclip_preview_company_import` first and review the preview report before calling this tool.
+- Pass the `adapterOverrides` from the preview response to ensure the same adapter configuration is used during apply.
+- If a 409 conflict error is returned, adjust `collisionStrategy` and preview again before retrying.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 400  | Invalid bundle | Verify source files are well-formed |
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+| 404  | Company not found | Verify the ID with `paperclip_list_companies` |
+| 409  | Conflict not resolvable | Try a different `collisionStrategy` and preview again |
+
+```json
+{
+  "tool": "paperclip_apply_company_import",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000",
+    "source": {
+      "type": "inline",
+      "rootPath": "acme-corp",
+      "files": {
+        "acme-corp/COMPANY.md": "# Acme Corp\n..."
+      }
+    },
+    "include": {
+      "company": true,
+      "agents": true,
+      "projects": false,
+      "issues": false,
+      "skills": false
+    },
+    "target": {
+      "mode": "existing_company",
+      "companyId": "00000000-0000-0000-0000-000000000000"
+    },
+    "collisionStrategy": "rename",
+    "adapterOverrides": {}
+  }
+}
+```

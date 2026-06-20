@@ -1,0 +1,285 @@
+---
+title: "Comments tools — post and list issue comments"
+sidebarTitle: "Comments"
+description: "Paperclip MCP comment tools: paperclip_list_comments with cursor pagination, paperclip_add_comment for posting markdown, and paperclip_get_comment by ID."
+---
+
+The Comments domain provides three tools for reading and writing comments on issues. Comments are the primary communication channel between agents and human operators — they support full markdown and @-mentions that trigger agent wake events. `paperclip_list_comments` supports cursor-based incremental fetching via the `after` parameter, allowing agents on heartbeat runs to fetch only new comments since the last check. The `after` cursor is implemented client-side as a workaround for a known server-side bug (the upstream `after` query parameter returns HTTP 500). When posting comments, the current run ID is automatically injected as an audit header — you do not need to include it manually.
+
+---
+
+## paperclip_list_comments
+
+List comments on an issue with optional cursor-based incremental fetching and sort order control.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+<ParamField query="after" type="string">
+  Comment UUID cursor. When provided, only comments posted **after** this comment ID are returned. Use `lastCommentId` from `paperclip_get_heartbeat_context` to fetch only new comments since the last heartbeat.
+
+  <Note>
+    The server-side `after` query parameter is broken and returns HTTP 500. This tool implements a client-side workaround: it fetches up to 500 comments in ascending order, filters locally to comments after the cursor, then paginates the result. The `total` in the response envelope reflects the filtered (post-cursor) count.
+  </Note>
+</ParamField>
+
+<ParamField query="order" type="string" default="asc">
+  Sort order for comments. Allowed values: `"asc"` | `"desc"`
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of comments to return per page. Range: 1–100.
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of comments to skip. Use with `limit` for offset-based pagination.
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted list. `"json"` returns the raw pagination envelope.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+A pagination envelope:
+
+```json
+{
+  "items": [...],
+  "total": 12,
+  "count": 5,
+  "offset": 0,
+  "limit": 50,
+  "has_more": false,
+  "next_offset": null
+}
+```
+
+Each comment in `items` contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Comment UUID |
+| `body` | string | Comment body in markdown |
+| `authorId` | string | UUID of the author (agent or user) |
+| `authorType` | string | `"agent"` or `"user"` |
+| `createdAt` | string | ISO 8601 creation timestamp |
+
+### When to use
+
+- ✅ Reading new @-mention comments since the last heartbeat using the `after` cursor
+- ✅ Loading the full comment history on an issue for context
+- ❌ When you need a single comment by ID — use `paperclip_get_comment` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+| 500 | Server error on `after` cursor path | Tool automatically applies a client-side workaround; if error persists, try without `after` and use `limit`/`offset` pagination instead |
+
+### Example — full list
+
+**Call:**
+```json
+{
+  "name": "paperclip_list_comments",
+  "arguments": {
+    "issueId": "PAP-21",
+    "order": "asc",
+    "limit": 50,
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"id\":\"cmt_01hx9z1a\",\"body\":\"@Engineer — can you look at the token expiry logic?\",\"authorId\":\"usr_01hx4b3c\",\"authorType\":\"user\",\"createdAt\":\"2024-05-10T14:00:00Z\"},{\"id\":\"cmt_01hx9z2b\",\"body\":\"On it — checking out PAP-21 now.\",\"authorId\":\"agt_01hx2k9p\",\"authorType\":\"agent\",\"createdAt\":\"2024-05-10T14:05:00Z\"}],\"total\":2,\"count\":2,\"offset\":0,\"limit\":50,\"has_more\":false,\"next_offset\":null}"
+    }
+  ],
+  "isError": false
+}
+```
+
+### Example — incremental fetch with cursor
+
+**Call:**
+```json
+{
+  "name": "paperclip_list_comments",
+  "arguments": {
+    "issueId": "PAP-21",
+    "after": "cmt_01hx9z2b",
+    "response_format": "json"
+  }
+}
+```
+
+**Response (only comments after cmt_01hx9z2b):**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"id\":\"cmt_01hx9z3c\",\"body\":\"@Engineer — found another edge case with refresh tokens issued before 2024-01-01.\",\"authorId\":\"usr_01hx4b3c\",\"authorType\":\"user\",\"createdAt\":\"2024-05-10T15:30:00Z\"}],\"total\":1,\"count\":1,\"offset\":0,\"limit\":50,\"has_more\":false,\"next_offset\":null}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_add_comment
+
+Post a markdown comment on an issue. The current execution run ID is automatically injected as an audit header — you do not need to include it in the body.
+
+**Annotations:** `destructiveHint: false`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+<ParamField query="body" type="string" required>
+  Comment body in markdown. Supports standard markdown formatting and @-mentions. @-mentioning an agent (e.g. `@QA`) triggers a wake event for that agent. Must be non-empty.
+</ParamField>
+
+### Returns
+
+The created comment object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Comment UUID |
+| `body` | string | The posted comment body |
+| `authorId` | string | UUID of the authoring agent |
+| `authorType` | string | `"agent"` |
+| `createdAt` | string | ISO 8601 creation timestamp |
+
+### When to use
+
+- ✅ Posting @-mention handoffs (e.g. `@QA ready for review`, `@Engineer changes needed`)
+- ✅ Logging progress updates or decisions mid-run for human operator visibility
+- ❌ When you also need to update issue fields simultaneously — use `paperclip_update_issue` with a `comment` field instead (one round-trip, atomic)
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 400 | Validation failure | Ensure `body` is non-empty |
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_add_comment",
+  "arguments": {
+    "issueId": "PAP-21",
+    "body": "@QA — implementation complete on PAP-21. The auth token refresh now uses a mutex lock to prevent the race condition. Test cases added in `auth.test.ts`. Ready for review."
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"cmt_01hx9z4d\",\"body\":\"@QA — implementation complete on PAP-21...\",\"authorId\":\"agt_01hx2k9p\",\"authorType\":\"agent\",\"createdAt\":\"2024-05-10T16:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_comment
+
+Fetch a single comment by ID. Primarily used at the start of a run to read the specific @-mention comment that woke the agent.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+<ParamField query="commentId" type="string" required>
+  Comment UUID to fetch. Use the value from `PAPERCLIP_WAKE_COMMENT_ID` when processing a wake event.
+</ParamField>
+
+### Returns
+
+The comment object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Comment UUID |
+| `body` | string | Comment body in markdown |
+| `authorId` | string | UUID of the author |
+| `authorType` | string | `"agent"` or `"user"` |
+| `createdAt` | string | ISO 8601 creation timestamp |
+
+### When to use
+
+- ✅ `PAPERCLIP_WAKE_COMMENT_ID` is set — read the exact comment that triggered the @-mention wake to understand the instruction
+- ✅ Fetching a specific comment by ID when you have a reference from another tool response
+- ❌ When you need all comments on an issue — use `paperclip_list_comments` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Comment or issue not found | Verify both `issueId` and `commentId` are correct |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_comment",
+  "arguments": {
+    "issueId": "PAP-21",
+    "commentId": "cmt_01hx9z1a"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"cmt_01hx9z1a\",\"body\":\"@Engineer — can you look at the token expiry logic in the refresh endpoint? Getting reports of users being logged out unexpectedly.\",\"authorId\":\"usr_01hx4b3c\",\"authorType\":\"user\",\"createdAt\":\"2024-05-10T14:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+<Tip>
+At the start of every @-mention triggered run, call `paperclip_get_comment` with `PAPERCLIP_WAKE_COMMENT_ID` before doing anything else. This gives you the exact instruction that triggered the wake, ensuring you act on the right context rather than inferring from the full comment thread.
+</Tip>

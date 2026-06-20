@@ -1,0 +1,237 @@
+---
+title: "Company tools — manage Paperclip company entities"
+sidebarTitle: "Company"
+description: "Paperclip MCP company tools: list, create, get, update, and archive company entities. The PAPERCLIP_COMPANY_ID env var scopes most other tools to a single company."
+---
+
+Companies are the top-level tenant boundary in Paperclip — every issue, agent, project, label, and secret belongs to a company. The `PAPERCLIP_COMPANY_ID` environment variable scopes all non-board tools to a single company, so agents typically work within one company without needing these tools directly. The five company tools are board-level operations for provisioning and managing the companies themselves: listing all tenants, creating new ones, reading full configuration, updating settings like name and budget, and archiving companies that are no longer needed.
+
+<Warning>
+  All company tools are **board-only** — they require a board (human-user) API key. Agent API keys receive a `403 Forbidden` response even for read operations. This applies to all five tools including `paperclip_list_companies` and `paperclip_get_company`.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="List Companies" icon="building" href="#paperclip_list_companies">
+    Discover all companies accessible to the board user
+  </Card>
+  <Card title="Create Company" icon="plus" href="#paperclip_create_company">
+    Provision a new company tenant on the board
+  </Card>
+  <Card title="Get Company" icon="magnifying-glass" href="#paperclip_get_company">
+    Read full configuration for a specific company
+  </Card>
+  <Card title="Update Company" icon="pencil" href="#paperclip_update_company">
+    Change name, description, or monthly budget
+  </Card>
+  <Card title="Archive Company" icon="box-archive" href="#paperclip_archive_company">
+    Permanently archive a decommissioned company
+  </Card>
+</CardGroup>
+
+---
+
+## paperclip_list_companies
+
+List all companies accessible to the authenticated board user, returning a paginated envelope.
+
+<ParamField path="limit" type="integer">
+  Maximum companies per page. Range 1–100. Defaults to `50`.
+</ParamField>
+
+<ParamField path="offset" type="integer">
+  Number of companies to skip for pagination. Defaults to `0`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) produces a human-readable list; `json` returns a structured envelope.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Company[], total, count, offset, limit, has_more, next_offset }`. Each `Company` item contains: `id`, `name`, `description`, `status`, `issuePrefix`, `budgetMonthlyCents`, `createdAt`.
+
+**Usage notes:**
+- Use to discover all company IDs before looking up a specific company by UUID.
+- If you already have the `companyId`, use `paperclip_get_company` directly for full details.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+
+```json
+{
+  "tool": "paperclip_list_companies",
+  "arguments": {
+    "limit": 50,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_company
+
+Create a new company tenant on the board. The `issuePrefix` is auto-generated from the company name and cannot be set manually.
+
+<ParamField path="name" type="string" required>
+  Company name. Must be non-empty. The `issuePrefix` (e.g. `PAP`) is derived automatically from this value.
+</ParamField>
+
+<ParamField path="description" type="string | null">
+  Company description. Optional; pass `null` or omit to leave blank.
+</ParamField>
+
+<ParamField path="budgetMonthlyCents" type="integer">
+  Monthly budget cap in cents (non-negative integer). For example, `5000` = $50.00. Omit for no budget limit.
+</ParamField>
+
+**Returns:** The created company object with all fields including the assigned UUID, auto-generated `issuePrefix`, `status: 'active'`, and timestamps.
+
+**Usage notes:**
+- Use when onboarding a new organization or setting up a new tenant on the board.
+- To modify an existing company, use `paperclip_update_company` instead.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 400  | Validation failure | Ensure `name` is non-empty |
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+
+```json
+{
+  "tool": "paperclip_create_company",
+  "arguments": {
+    "name": "Acme Corp",
+    "description": "Acme Corporation engineering workspace",
+    "budgetMonthlyCents": 100000
+  }
+}
+```
+
+---
+
+## paperclip_get_company
+
+Get the full configuration record for a single company by UUID.
+
+<ParamField path="companyId" type="string" required>
+  Company UUID (e.g. `00000000-0000-0000-0000-000000000000`).
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json` for structured output.
+</ParamField>
+
+**Returns:** Full company object: `id`, `name`, `description`, `status`, `issuePrefix`, `issueCounter`, `budgetMonthlyCents`, `spentMonthlyCents`, `requireBoardApprovalForNewAgents`, `feedbackDataSharingEnabled`, `brandColor`, `logoAssetId`, `pauseReason`, `pausedAt`, `createdAt`, `updatedAt`.
+
+**Usage notes:**
+- Use to read a company's budget, spending, status, or branding configuration.
+- To discover company IDs first, use `paperclip_list_companies`.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+| 404  | Company not found | Verify the ID with `paperclip_list_companies` |
+
+```json
+{
+  "tool": "paperclip_get_company",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_update_company
+
+Update a company's name, description, or monthly budget cap. Requires board-level authentication — agent keys are rejected even for CEO agents.
+
+<ParamField path="companyId" type="string" required>
+  Company UUID.
+</ParamField>
+
+<ParamField path="name" type="string">
+  New company name. Must be non-empty if provided.
+</ParamField>
+
+<ParamField path="description" type="string | null">
+  New description. Pass `null` to clear an existing description.
+</ParamField>
+
+<ParamField path="budgetMonthlyCents" type="integer">
+  New monthly budget cap in cents (non-negative integer). For example, `10000` = $100.00.
+</ParamField>
+
+**Returns:** The updated company object with all fields and updated timestamps.
+
+**Usage notes:**
+- Use when adjusting a company's monthly budget cap or renaming it after a rebrand.
+- To archive the company (status transition), use `paperclip_archive_company` — this tool does not modify `status`.
+- This operation is idempotent — calling it multiple times with the same values is safe.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | Agent keys are not accepted for this endpoint |
+| 404  | Company not found | Verify the ID with `paperclip_list_companies` |
+
+```json
+{
+  "tool": "paperclip_update_company",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000",
+    "budgetMonthlyCents": 200000,
+    "description": "Acme Corporation — Q3 workspace"
+  }
+}
+```
+
+---
+
+## paperclip_archive_company
+
+Archive a company, permanently setting its status to `archived`. This action is irreversible through the API — archived companies cannot be un-archived via any tool.
+
+<Warning>
+  This tool has `destructiveHint: true`. Archiving is **irreversible through the API**. Once a company is archived, all its agents, issues, and projects become inaccessible. Ensure you have exported any data you need before archiving.
+</Warning>
+
+<ParamField path="companyId" type="string" required>
+  Company UUID to archive.
+</ParamField>
+
+**Returns:** The updated company object with `status: 'archived'` and updated timestamps.
+
+**Usage notes:**
+- Use when decommissioning a company that is no longer in use.
+- To update other company fields (name, budget), use `paperclip_update_company` instead.
+- Consider running `paperclip_export_company` first to preserve a snapshot of the company's data.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Board key required | This endpoint requires board-level authentication |
+| 404  | Company not found | Verify the ID with `paperclip_list_companies` |
+
+```json
+{
+  "tool": "paperclip_archive_company",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```

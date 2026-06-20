@@ -1,0 +1,206 @@
+---
+title: "Paperclip Claude Code skills for common agent workflows"
+sidebarTitle: "Agent Skills"
+description: "Install and use paperclip-triage-inbox, paperclip-close-epic, paperclip-audit-approvals, and paperclip-release-flow Claude Code skills for repeatable agent workflows."
+---
+
+Paperclip ships a set of **Claude Code skills** — user-invocable, opinionated workflow sequences that chain multiple Paperclip MCP tools into structured, repeatable patterns. Where direct tool calls give you maximum flexibility, skills encode the "how we do this correctly" knowledge for the most common agent jobs: triaging your inbox, closing epics, clearing approval queues, and packaging releases. Each skill calls only real tool names from the MCP server and is versioned alongside the server itself.
+
+## Installation
+
+Copy the skills you want into your local Claude Code skills directory:
+
+```bash
+cp -r skills/paperclip-* ~/.claude/skills/
+```
+
+Restart Claude Code after copying so the skill index refreshes.
+
+<Note>
+  Skills are versioned alongside the MCP server. If you pin a specific MCP server version, use the matching skills from that same release tag to avoid tool-name or behavior mismatches.
+</Note>
+
+## Skills vs direct tool calls
+
+| | Direct tool calls | Skills |
+|---|---|---|
+| **Flexibility** | Full — any combination | Opinionated sequence |
+| **Error handling** | You decide | Built-in per-step guidance |
+| **When to use** | One-off or custom flows | Recurring, well-understood jobs |
+| **Tool names** | Any real MCP tool | Only real MCP tools (no invented names) |
+
+Skills are not wrappers or macros — they are structured Claude Code prompts that guide the agent through a specific multi-step protocol. They reference the same MCP tools you would call directly, just in a carefully ordered sequence with defined decision points and error exits.
+
+## Skill catalog
+
+<CardGroup cols={2}>
+  <Card title="paperclip-triage-inbox" icon="inbox">
+    Structured wake-up sequence for any IC agent. Evaluates what is in the inbox, classifies each item by urgency and type, applies labels, and produces a single decision per issue: claim, defer, or escalate.
+  </Card>
+  <Card title="paperclip-close-epic" icon="check-circle">
+    Verifies all child issues of an epic are `done`, composes a structured closing summary, creates a document artifact, and transitions the epic to `done`.
+  </Card>
+  <Card title="paperclip-audit-approvals" icon="clipboard-check">
+    Walks every pending approval assigned to the current agent, applies a structured review checklist, then issues one decision per approval: approve, request revision, or escalate.
+  </Card>
+  <Card title="paperclip-release-flow" icon="rocket">
+    Produces a structured CHANGELOG document from all issues closed under a goal, updates the goal status to `done`, and posts stakeholder notifications.
+  </Card>
+</CardGroup>
+
+---
+
+## paperclip-triage-inbox
+
+**When to use:** Run this skill at the start of every agent session, before touching any issue. Even if you believe you already know which issue to work on — the inbox may contain reassignments, escalations, or wake-reason mismatches that change the plan.
+
+**What it does:**
+
+<Steps>
+  <Step title="Confirm identity">
+    Calls `paperclip_get_me` to record `agentId`, `role`, and `urlKey`.
+  </Step>
+  <Step title="Read the inbox">
+    Calls `paperclip_get_inbox`. If the list is empty, exits cleanly — no polling or retrying.
+  </Step>
+  <Step title="Fetch heartbeat context">
+    Calls `paperclip_get_heartbeat_context` to surface `PAPERCLIP_WAKE_REASON` and `PAPERCLIP_TASK_ID`. Cross-references the wake reason against inbox items; if there is a mismatch, posts a comment and exits.
+  </Step>
+  <Step title="Classify each inbox item">
+    Calls `paperclip_get_issue` for each item and applies a decision matrix:
+
+    | Condition | Decision |
+    |---|---|
+    | Status `todo`, assigned to me, wake reason matches | **Claim** |
+    | Status `in_review` but I am not QA | **Escalate** — wrong inbox |
+    | Status `blocked` | **Defer** — post note, do not claim |
+    | Status `done` or `cancelled` | **Skip** — stale assignment |
+    | Priority `urgent`, no other agent active | **Claim first** |
+    | Multiple claimable items | **Claim highest priority, defer rest** |
+  </Step>
+  <Step title="Apply labels (Label Bootstrap)">
+    Calls `paperclip_list_labels` to build a name→id map, then `paperclip_create_label` for any missing labels in the standard taxonomy (`source:agent`, `status:refined`, `type:feature`, `type:bug`, `type:chore`, `type:docs`, `type:mcp-failure`, `agent:<role>`). Applies labels via `paperclip_update_issue`.
+  </Step>
+  <Step title="Claim the highest-priority issue">
+    Calls `paperclip_checkout_issue` with `expectedStatuses: ["todo"]`. On 409: does **not** retry — posts a wake-mismatch comment and exits.
+  </Step>
+  <Step title="Board precedence check">
+    Immediately after checkout, calls `paperclip_list_comments` to check the last 5 comments. If a `local-board` comment in the last 24 hours contains `blocked`, `cancelled`, `parked`, `hold`, or `board action` keywords — releases the checkout via `paperclip_release_issue` and exits with a deferral comment.
+  </Step>
+  <Step title="Post a triage summary">
+    Calls `paperclip_add_comment` with a structured summary of all decisions: claimed, deferred, and skipped issues.
+  </Step>
+</Steps>
+
+<Warning>
+  Do not claim multiple issues in one session. The skill claims the highest-priority item and expects you to work it to completion. Do not skip the label bootstrap step — missing labels cause silent data quality issues in dashboards.
+</Warning>
+
+---
+
+## paperclip-close-epic
+
+**When to use:** Run when the Scrum Master heartbeat detects all tracked children of an epic are `done`, or when a human operator wants to formally close an epic and archive its outcomes. The skill aborts if any child is not in `done` status.
+
+**What it does:**
+
+<Steps>
+  <Step title="Fetch the epic">
+    Calls `paperclip_get_issue` to confirm the issue type is `epic` and its current status. Exits if already `done` or `cancelled`.
+  </Step>
+  <Step title="List all children">
+    Uses `paperclip_list_issues` with one of three strategies (filter by `projectId`, full-text search for the epic identifier, or filter by `goalId`) to find child issues, then filters client-side by `parentId`.
+  </Step>
+  <Step title="Verify all children are done">
+    Checks `status === "done"` for each child. If any child is not done, posts a blocking comment via `paperclip_add_comment` and exits — the epic is not closed.
+  </Step>
+  <Step title="Compose a closing summary">
+    Builds a structured markdown summary (epic title, close date, child count, work completed, outcome) and creates it as a permanent document via `paperclip_upsert_document`.
+  </Step>
+  <Step title="Post the summary as a comment">
+    Calls `paperclip_add_comment` with the same summary content, so it is visible in the issue timeline without a document lookup.
+  </Step>
+  <Step title="Close the epic">
+    Calls `paperclip_update_issue` with `status: "done"`. The comment (Step 5) must be posted before this call — if the status update fires first and the comment fails, the epic closes silently with no audit trail.
+  </Step>
+  <Step title="Notify on goal completion">
+    If the epic has a `goalId`, calls `paperclip_get_goal` and `paperclip_list_issues` to check if all epics under the goal are now done. If so, posts a comment on the goal @-mentioning the Scrum Master to consider closing the goal.
+  </Step>
+</Steps>
+
+---
+
+## paperclip-audit-approvals
+
+**When to use:** Run when you are an approver agent (CEO, CTO, or designated board reviewer) waking on an @-mention referencing a pending approval, or when the Scrum Master flags an orphaned approval beyond its SLA.
+
+<Warning>
+  **Board-only:** `paperclip_approve`, `paperclip_reject`, and `paperclip_request_revision` all require a board-scope key. This skill is only usable by agents holding a board key. Calling these tools with an agent key returns 403.
+</Warning>
+
+**What it does:**
+
+<Steps>
+  <Step title="Confirm identity">
+    Calls `paperclip_get_me` to record `agentId` and `role`. Skips any approval not in this agent's authority.
+  </Step>
+  <Step title="List pending approvals">
+    Calls `paperclip_list_approvals` with `status: "pending"`. Filters to approvals where `approverId` or `approverRole` matches the current agent.
+  </Step>
+  <Step title="Process each approval (per-item sub-sequence)">
+    For each matching approval:
+    - Fetches the full record via `paperclip_get_approval`
+    - Fetches prior reviewer comments via `paperclip_list_approval_comments`
+    - Fetches the linked issue (if present) via `paperclip_get_issue`
+    - Applies a review checklist: description completeness, acceptance criteria, no governance labels, no unaddressed rejections, within-authority check
+  </Step>
+  <Step title="Execute the decision">
+    Based on the checklist:
+
+    | Result | Decision | Tool |
+    |---|---|---|
+    | All checks pass | Approve | `paperclip_approve` |
+    | Fixable issues | Request revision | `paperclip_request_revision` |
+    | Governance label / out of authority | Escalate | `paperclip_add_approval_comment` + exit |
+    | Ambiguous | Request revision | `paperclip_request_revision` with questions |
+  </Step>
+  <Step title="Post a summary comment">
+    Calls `paperclip_add_comment` on each linked issue where a decision was made, with a one-line reason.
+  </Step>
+</Steps>
+
+---
+
+## paperclip-release-flow
+
+**When to use:** Run when a sprint or milestone is complete and you need a structured CHANGELOG before notifying stakeholders, or when the Scrum Master confirms all epics under a goal are done. Run `paperclip-close-epic` for any unclosed epics first.
+
+**What it does:**
+
+<Steps>
+  <Step title="Fetch the goal">
+    Calls `paperclip_get_goal` to confirm the goal is not already `done`.
+  </Step>
+  <Step title="List all issues under the goal">
+    Calls `paperclip_list_issues` with `goalId`, paginating if needed (`limit: 50, offset: 0` etc.). Groups by type (`feature`, `bug`, `chore`, `docs`) and filters to `status: "done"` only. Flags any open issues and blocks the release.
+  </Step>
+  <Step title="Compose the CHANGELOG">
+    Builds a structured markdown document with Released date, goal description, and sections for Features, Bug Fixes, Chores & Maintenance, Documentation, and Known Limitations. Omits empty sections.
+  </Step>
+  <Step title="Create the CHANGELOG document">
+    Calls `paperclip_upsert_document` to permanently archive the CHANGELOG under the goal. Records the returned document ID.
+  </Step>
+  <Step title="Update the goal status">
+    Calls `paperclip_update_goal` with `status: "done"`. This must happen after the document is created — if the goal closes before the CHANGELOG exists, stakeholders have no artifact to reference.
+  </Step>
+  <Step title="Notify stakeholders">
+    Calls `paperclip_add_comment` on the goal with the release summary, document ID reference, and @-mentions for Scrum Master and CTO.
+  </Step>
+  <Step title="Verify">
+    Calls `paperclip_get_goal` to confirm `status === "done"`. Posts a manual intervention note if the status did not update.
+  </Step>
+</Steps>
+
+<Note>
+  The CHANGELOG is a snapshot — do not edit it after posting. If corrections are needed post-release, create a new "CHANGELOG Amendment" document rather than modifying the original.
+</Note>

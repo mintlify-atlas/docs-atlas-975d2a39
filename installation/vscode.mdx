@@ -1,0 +1,160 @@
+---
+title: "Set up Paperclip MCP in VS Code"
+sidebarTitle: "VS Code"
+description: "Configure Paperclip MCP as an MCP server in Visual Studio Code. Includes the exact settings.json config block for npm and Docker variants."
+---
+
+VS Code supports MCP servers through GitHub Copilot and other MCP-capable extensions. You can register Paperclip MCP at the workspace level — committing the config to source control so every contributor gets it automatically — or at the user level to share it across all projects on your machine. VS Code uses a slightly different config key format from Cursor, so make sure you follow the blocks below exactly for your target scope.
+
+## Config file location
+
+| Scope | Path |
+|---|---|
+| **Workspace** | `.vscode/mcp.json` in your project root (recommended for teams) |
+| **User (global)** | User `settings.json` under the `mcp.servers` key |
+
+<Tip>
+  Commit `.vscode/mcp.json` to source control. All contributors automatically get the Paperclip MCP server without any per-machine setup.
+</Tip>
+
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `PAPERCLIP_API_KEY` | **Yes** | Bearer token for API authentication |
+| `PAPERCLIP_API_URL` | **Yes** | Base URL of the Paperclip API, e.g. `http://127.0.0.1:3100` |
+| `PAPERCLIP_AGENT_ID` | **Yes** | UUID of the agent running this MCP server |
+| `PAPERCLIP_COMPANY_ID` | **Yes** | UUID of the company (used for company-scoped endpoints) |
+| `PAPERCLIP_RUN_ID` | No | Heartbeat run ID — injected automatically by Paperclip during agent runs |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | No | HTTP request timeout in milliseconds (default: `30000`) |
+
+## Configuration — `.vscode/mcp.json`
+
+Create or edit `.vscode/mcp.json` in your project root. Note that the VS Code workspace format uses a top-level `servers` key (not `mcpServers`) and requires a `"type": "stdio"` field.
+
+<Tabs>
+  <Tab title="npm (recommended)">
+    Requires Node.js ≥ 20 on the host.
+
+    ```json
+    {
+      "servers": {
+        "paperclip": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_KEY": "YOUR_API_KEY",
+            "PAPERCLIP_API_URL": "YOUR_API_URL",
+            "PAPERCLIP_AGENT_ID": "YOUR_AGENT_ID",
+            "PAPERCLIP_COMPANY_ID": "YOUR_COMPANY_ID"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Docker / Podman">
+    Isolated runtime — no Node.js required on the host. Replace `podman` with `docker` in `command` if you are using Docker.
+
+    ```json
+    {
+      "servers": {
+        "paperclip": {
+          "type": "stdio",
+          "command": "podman",
+          "args": [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "PAPERCLIP_API_KEY=YOUR_API_KEY",
+            "-e",
+            "PAPERCLIP_API_URL=YOUR_API_URL",
+            "-e",
+            "PAPERCLIP_AGENT_ID=YOUR_AGENT_ID",
+            "-e",
+            "PAPERCLIP_COMPANY_ID=YOUR_COMPANY_ID",
+            "ghcr.io/bruhsb/paperclip-mcp:2.1.0"
+          ]
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Configuration — user settings.json
+
+To register the server globally for all projects, open User Settings JSON (`Ctrl+Shift+P` → **Open User Settings (JSON)**) and add the `mcp.servers` key. The `"type": "stdio"` field is still required.
+
+<Tabs>
+  <Tab title="npm (recommended)">
+    ```json
+    {
+      "mcp.servers": {
+        "paperclip": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_KEY": "YOUR_API_KEY",
+            "PAPERCLIP_API_URL": "YOUR_API_URL",
+            "PAPERCLIP_AGENT_ID": "YOUR_AGENT_ID",
+            "PAPERCLIP_COMPANY_ID": "YOUR_COMPANY_ID"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Docker / Podman">
+    ```json
+    {
+      "mcp.servers": {
+        "paperclip": {
+          "type": "stdio",
+          "command": "podman",
+          "args": [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "PAPERCLIP_API_KEY=YOUR_API_KEY",
+            "-e",
+            "PAPERCLIP_API_URL=YOUR_API_URL",
+            "-e",
+            "PAPERCLIP_AGENT_ID=YOUR_AGENT_ID",
+            "-e",
+            "PAPERCLIP_COMPANY_ID=YOUR_COMPANY_ID",
+            "ghcr.io/bruhsb/paperclip-mcp:2.1.0"
+          ]
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Reload and verify
+
+<Steps>
+  <Step title="Reload the MCP server">
+    Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **MCP: Restart Server**. Alternatively, restart VS Code entirely.
+  </Step>
+  <Step title="Open Copilot Chat and confirm tool count">
+    Open a Copilot Chat panel and ask: **"What paperclip tools do you have?"**
+
+    You should see **104 tools** listed. If the count is lower or the server does not appear, check the troubleshooting guide.
+  </Step>
+</Steps>
+
+<Note>
+  For Paperclip-orchestrated heartbeat runs, `PAPERCLIP_RUN_ID` is injected automatically into the process environment — you do not need to add it to the config file.
+</Note>
+
+## See also
+
+- **Troubleshooting** — server not connecting, auth errors, network issues
+- **Auth keys** — how to obtain and rotate your `PAPERCLIP_API_KEY`
+- [Docker / Podman guide](/installation/docker) — building and running the container image locally

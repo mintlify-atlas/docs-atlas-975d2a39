@@ -1,0 +1,91 @@
+---
+title: "Install Paperclip MCP in your MCP host"
+sidebarTitle: "Overview"
+description: "Choose your installation method — npm, Docker, or Compose — and your MCP host. Links to host-specific setup guides for Claude Code, Cursor, VS Code, and Windsurf."
+---
+
+Paperclip MCP ships as a lightweight Node.js process that speaks MCP's stdio transport, making it compatible with every major AI coding assistant. You can run it directly via `npx` with no installation step, pull the pre-built container image from GitHub Container Registry, or spin up a full local Paperclip stack with a single Compose command. Pick the variant that matches your environment, then follow the host-specific guide below to drop in the exact config block your editor expects.
+
+## Installation variants
+
+Three first-class variants are supported. All three expose the same 104 tools — the difference is only in the runtime environment.
+
+| Variant | Requires Node.js | Approx. image size | Best for |
+|---|---|---|---|
+| **npm / npx** | Yes (≥ 20) | ~no image | Local dev, fastest startup |
+| **Docker / Podman** | No | ~186 MB | CI, air-gapped hosts, isolated runtime |
+| **Compose stack** | No | ~186 MB + server | Full local Paperclip + MCP in one command |
+
+<Note>
+  The npm variant uses `npx -y paperclip-mcp`, which downloads and caches the package on first run. Subsequent starts use the cached copy — no re-download unless the version changes.
+</Note>
+
+## Required environment variables
+
+Every variant requires the same four environment variables. Two optional variables are injected automatically by Paperclip during orchestrated agent runs.
+
+| Variable | Required | Description |
+|---|---|---|
+| `PAPERCLIP_API_KEY` | **Yes** | Bearer token for API authentication |
+| `PAPERCLIP_API_URL` | **Yes** | Base URL of the Paperclip API, e.g. `http://127.0.0.1:3100` |
+| `PAPERCLIP_AGENT_ID` | **Yes** | UUID of the agent running this MCP server |
+| `PAPERCLIP_COMPANY_ID` | **Yes** | UUID of the company (used for company-scoped endpoints) |
+| `PAPERCLIP_RUN_ID` | No | Heartbeat run ID — injected automatically by Paperclip during agent runs |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | No | HTTP request timeout in milliseconds (default: `30000`) |
+
+<Warning>
+  The server exits immediately at startup if any required variable is absent. Check your environment config before restarting your MCP host.
+</Warning>
+
+## Choose your MCP host
+
+Follow the guide for your editor. Each page contains the exact config block, file location, and verification steps.
+
+<CardGroup cols={2}>
+  <Card
+    title="Claude Code"
+    icon="terminal"
+    href="/installation/claude-code"
+  >
+    CLI (`claude mcp add`) and `settings.json` — npm and Docker variants covered.
+  </Card>
+  <Card
+    title="Cursor"
+    icon="code"
+    href="/installation/cursor"
+  >
+    `.cursor/mcp.json` project or global config — npm and Docker variants covered.
+  </Card>
+  <Card
+    title="VS Code"
+    icon="brackets-curly"
+    href="/installation/vscode"
+  >
+    `.vscode/mcp.json` or user `settings.json` — npm and Docker variants covered.
+  </Card>
+  <Card
+    title="Windsurf"
+    icon="wind"
+    href="/installation/windsurf"
+  >
+    Windsurf `mcpServers` config — npm and Docker variants covered.
+  </Card>
+</CardGroup>
+
+## Docker and Compose
+
+If you prefer a containerised runtime or want to run the full Paperclip server alongside the MCP process, see the Docker guide.
+
+<CardGroup cols={2}>
+  <Card
+    title="Docker / Podman"
+    icon="docker"
+    href="/installation/docker"
+  >
+    Pre-built image, local build, networking, security hardening, and smoke testing.
+  </Card>
+</CardGroup>
+
+## Verification
+
+Regardless of host or variant, verification is the same: open a chat with your AI assistant and ask **"What paperclip tools do you have?"** You should see **104 tools** listed across domains including Issues, Agents, Approvals, Routines, Secrets, and more. If the count is lower or the server does not appear, consult the troubleshooting guide.

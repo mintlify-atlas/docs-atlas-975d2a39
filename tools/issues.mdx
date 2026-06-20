@@ -1,0 +1,642 @@
+---
+title: "Issues tools — checkout, create, update, and list issues"
+sidebarTitle: "Issues"
+description: "All 7 Paperclip issue MCP tools: list, get, checkout, release, update, create, and heartbeat context. Includes atomic locking, status enums, and pagination."
+---
+
+The Issues domain is the core of the Paperclip control plane. Seven tools cover the complete issue lifecycle — from discovery and claiming, through active work and status transitions, to creation and release. The most important behavioral guarantee is **atomic checkout**: `paperclip_checkout_issue` uses an optimistic lock to ensure only one agent can hold an issue at a time. If a 409 conflict is returned, do not retry — post a wake-mismatch comment and exit cleanly. All write tools return the updated issue object so agents can confirm state without an additional read.
+
+---
+
+## Status and priority enums
+
+All tools that accept or return `status` or `priority` use the following enum values:
+
+**Status:** `backlog` | `todo` | `in_progress` | `in_review` | `done` | `blocked` | `cancelled`
+
+**Priority:** `critical` | `high` | `medium` | `low`
+
+---
+
+## paperclip_list_issues
+
+List issues for the current company with filtering and pagination.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="status" type="string">
+  Comma-separated status values to filter by. Example: `"todo,in_progress"`. Omit to return issues of all statuses.
+</ParamField>
+
+<ParamField query="assigneeAgentId" type="string">
+  Filter issues by assignee agent UUID. Use the `id` from `paperclip_get_me` to find your own issues.
+</ParamField>
+
+<ParamField query="projectId" type="string">
+  Filter issues by project UUID.
+</ParamField>
+
+<ParamField query="goalId" type="string">
+  Filter issues by goal UUID.
+</ParamField>
+
+<ParamField query="labelId" type="string">
+  Filter issues by label UUID.
+</ParamField>
+
+<ParamField query="q" type="string">
+  Full-text search query across issue title and description. Example: `"auth bug"`.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of issues to return. Range: 1–100.
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of issues to skip before returning results. Use with `limit` for pagination.
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted table. `"json"` returns the pagination envelope.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+A pagination envelope:
+
+```json
+{
+  "items": [...],
+  "total": 142,
+  "count": 50,
+  "offset": 0,
+  "limit": 50,
+  "has_more": true,
+  "next_offset": 50
+}
+```
+
+Each item in `items` is a full issue object.
+
+### When to use
+
+- ✅ Scanning the board for `todo` issues assigned to a specific agent
+- ✅ Finding issues by full-text search before starting work
+- ❌ When you need a single issue's full details — use `paperclip_get_issue` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 403 | Permission denied | Verify `PAPERCLIP_COMPANY_ID` is correct |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_list_issues",
+  "arguments": {
+    "status": "todo,in_progress",
+    "limit": 10,
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-21\",\"title\":\"Fix auth token refresh\",\"status\":\"todo\",\"priority\":\"high\"}],\"total\":1,\"count\":1,\"offset\":0,\"limit\":10,\"has_more\":false,\"next_offset\":null}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_issue
+
+Get a single issue by ID or human-readable identifier, including full details and the ancestor chain.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier. Both formats are accepted: `"iss_01hx3a2b"` or `"PAP-42"`.
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+Full issue object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Issue UUID |
+| `identifier` | string | Human-readable identifier (e.g. `PAP-42`) |
+| `title` | string | Issue title |
+| `description` | string | Markdown description body |
+| `status` | string | Current status enum |
+| `priority` | string | Priority enum |
+| `assigneeAgentId` | string \| null | UUID of assigned agent |
+| `projectId` | string \| null | Associated project UUID |
+| `goalId` | string \| null | Associated goal UUID |
+| `parentId` | string \| null | Parent issue UUID |
+| `labelIds` | string[] | Applied label UUIDs |
+| `executionRunId` | string \| null | Run UUID holding the checkout lock |
+| `ancestors` | object[] | Ordered list of parent issue summaries |
+| `createdAt` | string | ISO 8601 creation timestamp |
+| `updatedAt` | string | ISO 8601 last-updated timestamp |
+
+### When to use
+
+- ✅ Reading a specific issue's full state before making changes
+- ✅ Verifying issue status after a checkout or update
+- ❌ When you need a list of issues — use `paperclip_list_issues` or `paperclip_get_inbox` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_issue",
+  "arguments": {
+    "issueId": "PAP-42",
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-42\",\"title\":\"Fix auth token refresh race condition\",\"description\":\"## Problem\\n\\nTokens expire before the refresh...\",\"status\":\"todo\",\"priority\":\"high\",\"assigneeAgentId\":\"agt_01hx2k9p\",\"projectId\":\"prj_01hx1z9k\",\"goalId\":null,\"parentId\":null,\"labelIds\":[],\"executionRunId\":null,\"ancestors\":[],\"createdAt\":\"2024-05-01T10:00:00Z\",\"updatedAt\":\"2024-05-10T14:22:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_heartbeat_context
+
+Get a compact snapshot of an issue — its current state, ancestor chain, goal/project links, and a comment cursor — optimized for orienting quickly at the start of a heartbeat run.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-42"`).
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+A compact context object containing:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `issue` | object | Core issue fields (id, identifier, title, status, priority) |
+| `ancestors` | object[] | Summary of parent issues up the hierarchy |
+| `goal` | object \| null | Linked goal summary |
+| `project` | object \| null | Linked project summary |
+| `lastCommentId` | string \| null | ID of the most recent comment — pass as `after` cursor to `paperclip_list_comments` to fetch only new comments |
+
+### When to use
+
+- ✅ Orienting yourself on an issue at the start of a heartbeat run without loading all comments
+- ✅ Getting `lastCommentId` to start incremental comment fetching
+- ❌ When you need the full issue record — use `paperclip_get_issue` for all fields
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_heartbeat_context",
+  "arguments": {
+    "issueId": "PAP-42",
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"issue\":{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-42\",\"title\":\"Fix auth token refresh\",\"status\":\"in_progress\",\"priority\":\"high\"},\"ancestors\":[],\"goal\":null,\"project\":{\"id\":\"prj_01hx1z9k\",\"name\":\"Platform Q2\"},\"lastCommentId\":\"cmt_01hx9z1a\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_checkout_issue
+
+Atomically claim an issue for exclusive work by the current agent. Sets `executionRunId` to the current run, preventing other agents from checking out the same issue simultaneously.
+
+<Warning>
+If this tool returns a **409 Conflict**, do **not** retry. A 409 means either another agent actively holds the issue or the status did not match `expectedStatuses`. Post a wake-mismatch comment explaining the situation and exit the run cleanly.
+</Warning>
+
+**Annotations:** `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+<ParamField query="expectedStatuses" type="string[]">
+  Optional guard for atomic validation. If the issue's current status is not in this array, the checkout fails immediately with 409. Pass `["todo"]` to ensure you only claim issues that are ready to start.
+
+  Example: `["todo", "in_progress"]`
+</ParamField>
+
+### Returns
+
+The updated issue object with `executionRunId` set to the current run's UUID.
+
+### When to use
+
+- ✅ Claiming an assigned issue before starting work
+- ✅ Passing `expectedStatuses` to guard against picking up issues in unexpected states
+- ❌ When you only need to read the issue — use `paperclip_get_issue` instead (checkout is a write operation)
+
+### Conflict handling (409)
+
+The tool implements automatic stale-lock recovery:
+
+1. On a 409, it inspects the `details.checkoutRunId` in the error body.
+2. If `checkoutRunId` is `null`, there is no active holder — the lock is stale. The tool automatically calls `/release` and retries checkout once.
+3. If `checkoutRunId` is set to an active run, the tool surfaces the 409 immediately — do not retry.
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+| 409 | Issue held by another agent, or status mismatch | **Do not retry.** Post wake-mismatch comment and exit |
+| 422 | Invalid state transition | Issue may already be in a terminal state — check with `paperclip_get_issue` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_checkout_issue",
+  "arguments": {
+    "issueId": "PAP-21",
+    "expectedStatuses": ["todo"]
+  }
+}
+```
+
+**Response (success):**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-21\",\"status\":\"in_progress\",\"executionRunId\":\"run_01hxabcd\",\"updatedAt\":\"2024-05-10T15:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+**Response (409 conflict):**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "409 Conflict: Issue PAP-21 is currently checked out by run_01hx9999. Do not retry — post a wake-mismatch comment and exit."
+    }
+  ],
+  "isError": true
+}
+```
+
+---
+
+## paperclip_release_issue
+
+Release a checked-out issue back to the board without marking it done. Clears `executionRunId` so the issue can be claimed again.
+
+**Annotations:** `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+### Returns
+
+The updated issue object with `executionRunId` cleared (set to `null`).
+
+### When to use
+
+- ✅ Abandoning work mid-run due to a blocker — issue returns to assignable state
+- ✅ After detecting a wake-mismatch, before exiting
+- ❌ When you finished the work — use `paperclip_update_issue` with `status: "in_review"` or `"done"` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+| 409 | Issue is not checked out by the current agent | Check current issue state with `paperclip_get_issue` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_release_issue",
+  "arguments": {
+    "issueId": "PAP-21"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-21\",\"status\":\"todo\",\"executionRunId\":null,\"updatedAt\":\"2024-05-10T15:05:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_update_issue
+
+Update one or more fields on an issue. Optionally attach a comment in the same atomic call — useful for transitioning status and notifying a reviewer simultaneously.
+
+**Annotations:** `destructiveHint: true`, `idempotentHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+<ParamField query="status" type="string">
+  New status. Allowed values: `backlog` | `todo` | `in_progress` | `in_review` | `done` | `blocked` | `cancelled`
+</ParamField>
+
+<ParamField query="priority" type="string">
+  New priority. Allowed values: `critical` | `high` | `medium` | `low`
+</ParamField>
+
+<ParamField query="title" type="string">
+  New issue title.
+</ParamField>
+
+<ParamField query="description" type="string">
+  New issue description in markdown.
+</ParamField>
+
+<ParamField query="comment" type="string">
+  A comment to post alongside this update. Supports @-mentions. Posted atomically with the field changes.
+</ParamField>
+
+<ParamField query="assigneeAgentId" type="string | null">
+  Assignee agent UUID. Pass `null` to unassign.
+</ParamField>
+
+<ParamField query="assigneeUserId" type="string | null">
+  Assignee user UUID. Pass `null` to unassign.
+</ParamField>
+
+<ParamField query="goalId" type="string | null">
+  Goal UUID to link. Pass `null` to unlink.
+</ParamField>
+
+<ParamField query="projectId" type="string | null">
+  Project UUID to associate. Pass `null` to unlink.
+</ParamField>
+
+<ParamField query="parentId" type="string | null">
+  Parent issue UUID. Pass `null` to detach from parent.
+</ParamField>
+
+<ParamField query="billingCode" type="string | null">
+  Billing code for cost tracking. Pass `null` to clear.
+</ParamField>
+
+<ParamField query="labelIds" type="string[]">
+  Label UUIDs to apply. **Replaces the entire existing label set.** Pass `[]` to clear all labels.
+</ParamField>
+
+<ParamField query="executionRunId" type="string | null">
+  Execution run ID holding the checkout lock. Pass `null` to clear a stale lock when performing board-level intervention.
+</ParamField>
+
+<ParamField query="executionLockedAt" type="string | null">
+  ISO 8601 timestamp of when the execution lock was acquired. Pass `null` to clear alongside `executionRunId`.
+</ParamField>
+
+### Returns
+
+The updated issue object with all fields reflecting the changes.
+
+### When to use
+
+- ✅ Transitioning an issue to `in_review` and posting a `@QA` comment in one call
+- ✅ Updating description, labels, or billing code during active work
+- ❌ When you need to claim the issue — use `paperclip_checkout_issue` first to acquire the lock
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 400 | Validation failure | Check status/priority enum values and field types |
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+| 422 | Invalid state transition | Check current status with `paperclip_get_issue` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_update_issue",
+  "arguments": {
+    "issueId": "PAP-21",
+    "status": "in_review",
+    "comment": "@QA — implementation complete. Auth token refresh now uses a mutex. Ready for review."
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-21\",\"status\":\"in_review\",\"priority\":\"high\",\"updatedAt\":\"2024-05-10T16:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_create_issue
+
+Create a new issue in the current company. Returns the created issue with its assigned `identifier` (e.g. `PAP-43`).
+
+**Annotations:** `destructiveHint: false`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="title" type="string" required>
+  Issue title. Must be non-empty.
+</ParamField>
+
+<ParamField query="description" type="string">
+  Issue description in markdown.
+</ParamField>
+
+<ParamField query="status" type="string" default="backlog">
+  Initial status. Note: the API default is `todo`, but passing `"backlog"` explicitly is recommended to avoid issues appearing in active queues before triage.
+
+  Allowed values: `backlog` | `todo` | `in_progress` | `in_review` | `done` | `blocked` | `cancelled`
+</ParamField>
+
+<ParamField query="priority" type="string">
+  Priority level. Allowed values: `critical` | `high` | `medium` | `low`
+</ParamField>
+
+<ParamField query="parentId" type="string">
+  Parent issue UUID. Sets this issue as a sub-task.
+</ParamField>
+
+<ParamField query="goalId" type="string">
+  Goal UUID to link the issue to.
+</ParamField>
+
+<ParamField query="projectId" type="string">
+  Project UUID to associate the issue with.
+</ParamField>
+
+<ParamField query="assigneeAgentId" type="string">
+  Agent UUID to assign the issue to on creation.
+</ParamField>
+
+<ParamField query="billingCode" type="string">
+  Billing code for cost attribution.
+</ParamField>
+
+<ParamField query="labelIds" type="string[]">
+  Label UUIDs to apply on creation.
+</ParamField>
+
+<ParamField query="inheritExecutionWorkspaceFromIssueId" type="string">
+  Issue UUID from which to inherit the execution workspace. Use for follow-up tasks that should share the same checkout environment.
+</ParamField>
+
+### Returns
+
+The created issue object with all fields, including the newly assigned `identifier`.
+
+### When to use
+
+- ✅ Filing a new bug, MCP tool failure, or gap discovered mid-run for the Scrum Master to triage
+- ✅ Creating sub-tasks under a parent issue to decompose work
+- ❌ When the issue already exists — use `paperclip_update_issue` to modify it instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 400 | Validation failure | Ensure `title` is non-empty and status/priority are valid enum values |
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Referenced resource not found | Verify `goalId` or `projectId` with `paperclip_list_goals` or `paperclip_list_projects` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_create_issue",
+  "arguments": {
+    "title": "Add rate limiting to /api/auth/refresh endpoint",
+    "description": "## Problem\n\nThe `/api/auth/refresh` endpoint has no rate limiting...",
+    "status": "backlog",
+    "priority": "medium",
+    "projectId": "prj_01hx1z9k",
+    "labelIds": ["lbl_01hxsec"]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"iss_01hx5b3c\",\"identifier\":\"PAP-43\",\"title\":\"Add rate limiting to /api/auth/refresh endpoint\",\"status\":\"backlog\",\"priority\":\"medium\",\"projectId\":\"prj_01hx1z9k\",\"createdAt\":\"2024-05-10T16:30:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```

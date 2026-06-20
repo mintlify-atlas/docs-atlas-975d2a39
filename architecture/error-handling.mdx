@@ -1,0 +1,152 @@
+---
+title: "Error handling in Paperclip MCP tool handlers"
+sidebarTitle: "Error Handling"
+description: "How Paperclip MCP surfaces API errors as structured tool results. Covers error layers, HTTP status mappings, handleApiError pattern, and McpError types."
+---
+
+Paperclip MCP never lets an API failure crash the server. Instead, every error that originates from the Paperclip API is converted into a structured `ToolResult` with `isError: true` — a value the MCP host and the agent can inspect and act on. Protocol-level errors (bad arguments, unknown tool names) are the only exceptions that propagate as JSON-RPC errors; everything else is caught and returned as a human-readable tool result.
+
+## Error layers
+
+Five distinct error layers cover the complete lifecycle from startup to individual tool call:
+
+| Layer | Error type | How it surfaces |
+|---|---|---|
+| Argument validation | `McpError(InvalidParams)` | Thrown by `validate()`; re-thrown by `handleApiError`; SDK converts to a JSON-RPC error response |
+| Unknown tool name | `McpError(MethodNotFound)` | Raised in the registry dispatcher; SDK converts to a JSON-RPC error response |
+| HTTP 4xx/5xx | `PaperclipApiError` | Caught by `handleApiError`; returned as `{ isError: true, content: [...] }` |
+| Startup / config | `Error` (plain) | Thrown by `getAuthConfig()`; caught in `main()`, logged to stderr, process exits 1 |
+| Unhandled fatal | any | `main().catch(...)` logs and exits 1 |
+
+<Note>
+`McpError` is intentionally **not** caught by `handleApiError`. It is re-thrown so the MCP SDK can translate it into the correct JSON-RPC error shape, which is distinct from the tool-result `isError` shape.
+</Note>
+
+## ToolResult shape
+
+All 104 tool handlers return values conforming to this type:
+
+```typescript
+type ToolResult = {
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+};
+```
+
+When `isError` is `true`, `content[0].text` contains a human-readable, LLM-actionable error message that includes the tool name, HTTP status, and a recovery hint. When `isError` is absent or `false`, the tool succeeded and `content[0].text` contains the JSON-encoded API response.
+
+## The handleApiError pattern
+
+Every tool handler in `src/tools/*.ts` wraps its logic in the same try/catch structure:
+
+```typescript
+import { validate, handleApiError } from "./validation.js";
+
+async handler(args, client) {
+  try {
+    const input = validate(Schema, args);
+    const data = await client.get<unknown>(path);
+    return { content: [{ type: "text", text: JSON.stringify(data) }] };
+  } catch (err) {
+    return handleApiError(err, { tool: "paperclip_example_tool", resource: "example" });
+  }
+}
+```
+
+`handleApiError` (in `src/tools/validation.ts`) applies this logic in order:
+
+1. If `err` is a `McpError` → **re-throws** it. The SDK handles it as a protocol error.
+2. If `err` is a `PaperclipApiError` → converts to `{ isError: true }` with a status-specific message.
+3. If `err` is an `AbortError` (timeout via `AbortSignal.timeout`) → converts to `{ isError: true }` with a timeout message.
+4. If `err` is a `TypeError` with a fetch message → converts to `{ isError: true }` with a network error message.
+5. All other errors → converts to `{ isError: true }` with the raw error message.
+
+## HTTP status code behavior
+
+`handleApiError` produces distinct, actionable messages for each HTTP status class:
+
+| Status | Message pattern | Recovery hint |
+|:---:|---|---|
+| `400` | `400 Bad request in <tool>: <body>. Check the input parameters and try again.` | Fix input args |
+| `401` | `401 Authentication failed for <tool>. Check PAPERCLIP_API_KEY is valid and not expired.` | Rotate API key |
+| `403` | `403 Permission denied for <tool>. This endpoint may require a board (human-user) API key.` | Use board key |
+| `404` | `404 Not found in <tool>: the <resource> ID may not exist … Verify the ID with paperclip_list_<resource>s.` | List to find correct ID |
+| `409` | `409 Conflict in <tool>: <body>. Do not retry — refresh state with paperclip_get_<resource>.` | Fetch current state |
+| `422` | `422 Validation failure in <tool>: <body>. Check the submitted values.` | Fix submitted values |
+| `429` | `429 Rate limited on <tool>. Wait a few seconds before retrying.` | Back off |
+| `5xx` | `Paperclip API server error (<status>) in <tool>. This is usually transient; retry in a few seconds.` | Retry once |
+
+## PaperclipApiError class
+
+`PaperclipApiError` is defined in `src/errors.ts` and thrown by `PaperclipClient.handleResponse` whenever the API returns a non-2xx status:
+
+```typescript
+export class PaperclipApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly body: unknown,
+    message?: string
+  ) {
+    super(message ?? `Paperclip API error ${status} ${statusText}: ${JSON.stringify(body)}`);
+    this.name = "PaperclipApiError";
+  }
+}
+```
+
+| Property | Type | Content |
+|---|---|---|
+| `status` | `number` | HTTP status code (e.g. `404`, `409`, `500`) |
+| `statusText` | `string` | HTTP status text (e.g. `"Not Found"`) |
+| `body` | `unknown` | Parsed JSON response body, or raw text if JSON parse fails |
+
+`handleApiError` inspects `body` for a `message` property first; if present it uses that string in the error message instead of `statusText`.
+
+## validate() and McpError
+
+`validate()` in `src/tools/validation.ts` wraps Zod's `safeParse`. On failure it throws `McpError(ErrorCode.InvalidParams, result.error.message)`:
+
+```typescript
+export function validate<T>(schema: z.ZodType<T>, args: unknown): T {
+  const result = schema.safeParse(args);
+  if (!result.success) {
+    throw new McpError(ErrorCode.InvalidParams, result.error.message);
+  }
+  return result.data;
+}
+```
+
+Because `handleApiError` re-throws `McpError`, this error escapes the try/catch in the handler and propagates to the MCP SDK, which converts it to a well-formed JSON-RPC error response. The agent sees an argument validation failure rather than a generic tool error.
+
+## Unhandled errors in the registry
+
+The `CallToolRequestSchema` handler in `src/tools/index.ts` has its own catch block as a safety net for errors that escape `handleApiError`:
+
+```typescript
+try {
+  return await tool.handler(request.params.arguments ?? {}, client);
+} catch (err) {
+  if (err instanceof McpError) throw err;
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`Paperclip MCP unhandled error in ${toolName}: ${message}\n`);
+  return {
+    isError: true,
+    content: [{ type: "text", text: `Paperclip MCP error in ${toolName}: ${message}` }],
+  };
+}
+```
+
+`McpError` is still re-thrown from here. All other unhandled errors are logged to `process.stderr` and returned as an `isError: true` result — the server never crashes from a single bad tool call.
+
+## Startup and fatal errors
+
+`src/auth.ts` calls `getAuthConfig()` synchronously at startup. If any required environment variable is missing, it throws a plain `Error` immediately:
+
+```typescript
+if (!apiKey) throw new Error("PAPERCLIP_API_KEY is required");
+if (!apiUrl)  throw new Error("PAPERCLIP_API_URL is required");
+if (!agentId) throw new Error("PAPERCLIP_AGENT_ID is required");
+if (!companyId) throw new Error("PAPERCLIP_COMPANY_ID is required");
+```
+
+These errors bubble up to `main().catch()` in `src/index.ts`, which logs them to stderr and calls `process.exit(1)`. The server never enters a partially-configured state.

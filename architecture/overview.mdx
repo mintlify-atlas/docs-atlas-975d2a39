@@ -1,0 +1,282 @@
+---
+title: "Paperclip MCP architecture and internal module guide"
+sidebarTitle: "Overview"
+description: "How paperclip-mcp translates MCP tool calls into Paperclip API requests. Covers the tool registry, client module, auth flow, and how to add new tools."
+---
+
+Paperclip MCP is a thin adapter that bridges the [Model Context Protocol](https://modelcontextprotocol.io) with the Paperclip control plane REST API. It runs as a stdio server, receives JSON-RPC tool calls from Claude Code (or any MCP host), and translates each call into an authenticated HTTP request — returning structured results the agent can reason about. There is no business logic inside the adapter: every tool is a direct, typed mapping onto one Paperclip API endpoint.
+
+## System diagram
+
+The adapter sits between the MCP host and the Paperclip API. All communication with the host flows over stdio as JSON-RPC; all communication with the API flows over HTTP with a bearer token and optional run ID header.
+
+```
+┌──────────────────────────────────────┐
+│              MCP Host                │
+│  (Claude Code / other MCP client)    │
+└──────────────┬───────────────────────┘
+               │ MCP stdio (JSON-RPC)
+               │ tools/list · tools/call
+┌──────────────▼───────────────────────┐
+│         paperclip-mcp server         │
+│                                      │
+│  src/index.ts       — entry point    │
+│  src/tools/index.ts — registry       │
+│  src/tools/*.ts     — handlers       │
+│  src/client.ts      — HTTP client    │
+│  src/auth.ts        — auth config    │
+│  src/errors.ts      — error type     │
+└──────────────┬───────────────────────┘
+               │ HTTP/HTTPS
+               │ Authorization: Bearer <token>
+               │ X-Paperclip-Run-Id: <run-id>
+┌──────────────▼───────────────────────┐
+│      Paperclip control plane API     │
+│         ($PAPERCLIP_API_URL)         │
+└──────────────────────────────────────┘
+```
+
+## Entry flow
+
+`src/index.ts` is the executable entry point. It performs three things in order:
+
+<Steps>
+  <Step title="Create the MCP Server">
+    Instantiates a `Server` from the MCP SDK with `{ capabilities: { tools: {} } }`, declaring that this server exposes tools and nothing else.
+  </Step>
+  <Step title="Register all tools">
+    Calls `registerAllTools(server)`, which constructs a `PaperclipClient`, builds a `Map<name, ToolDefinition>` from `ALL_TOOLS`, and attaches the `tools/list` and `tools/call` request handlers.
+  </Step>
+  <Step title="Connect the transport">
+    Creates a `StdioServerTransport` and calls `server.connect(transport)`. From this point the process listens on stdin and responds on stdout. Any startup failure in `main()` is caught by `.catch()`, logged to stderr, and exits with code `1`.
+  </Step>
+</Steps>
+
+```typescript
+// src/index.ts (simplified)
+const server = new Server(
+  { name: "paperclip-mcp", version: SERVER_VERSION },
+  { capabilities: { tools: {} } }
+);
+
+registerAllTools(server);
+
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+## Key modules
+
+<CardGroup cols={2}>
+  <Card title="src/index.ts" icon="bolt">
+    Entry point. Creates the `Server`, calls `registerAllTools`, connects `StdioServerTransport`, and provides the top-level fatal error handler.
+  </Card>
+  <Card title="src/tools/index.ts" icon="list">
+    Tool registry. Owns `ToolDefinition`, `ToolAnnotations`, and `ToolResult` types. Exports `ALL_TOOLS` and `registerAllTools()`.
+  </Card>
+  <Card title="src/client.ts" icon="globe">
+    `PaperclipClient`. Typed HTTP wrapper with `get`, `post`, `patch`, `put`, `delete`, and `postForm` methods. Reads credentials from `getAuthConfig()` at construction time and enforces `AbortSignal.timeout`.
+  </Card>
+  <Card title="src/auth.ts" icon="lock">
+    Reads and validates five environment variables at startup. Throws immediately if any required variable is missing — never defers validation to the first API call.
+  </Card>
+  <Card title="src/errors.ts" icon="circle-exclamation">
+    Defines `PaperclipApiError` with `status`, `statusText`, and `body` properties. Thrown by `PaperclipClient.handleResponse` on any non-2xx HTTP response.
+  </Card>
+  <Card title="src/tools/validation.ts" icon="shield-check">
+    Shared helpers imported by every tool handler: `validate()`, `handleApiError()`, `toJsonSchema()`, `composeDescription()`, and common Zod schemas.
+  </Card>
+</CardGroup>
+
+### Tool handlers — `src/tools/*.ts`
+
+Nineteen modules each export an array of `ToolDefinition` objects. Together they register **104 tools** across every Paperclip domain:
+
+| Module | Count | Representative tools |
+|---|:---:|---|
+| `identity.ts` | 4 | `paperclip_get_me`, `paperclip_get_inbox`, `paperclip_get_current_user`, `paperclip_revoke_current_session` |
+| `issues.ts` | 7 | `paperclip_list_issues`, `paperclip_get_issue`, `paperclip_checkout_issue`, `paperclip_release_issue`, `paperclip_update_issue` |
+| `comments.ts` | 3 | `paperclip_list_comments`, `paperclip_add_comment`, `paperclip_get_comment` |
+| `documents.ts` | 5 | `paperclip_list_documents`, `paperclip_get_document`, `paperclip_upsert_document`, `paperclip_delete_document`, `paperclip_get_document_revisions` |
+| `agents.ts` | 17 | `paperclip_list_agents`, `paperclip_create_agent`, `paperclip_invoke_heartbeat`, `paperclip_terminate_agent`, `paperclip_sync_agent_skills` |
+| `dashboard.ts` | 1 | `paperclip_get_dashboard` |
+| `approvals.ts` | 11 | `paperclip_list_approvals`, `paperclip_create_approval`, `paperclip_approve`, `paperclip_reject`, `paperclip_create_agent_hire` |
+| `goals.ts` | 4 | `paperclip_list_goals`, `paperclip_get_goal`, `paperclip_create_goal`, `paperclip_update_goal` |
+| `projects.ts` | 8 | `paperclip_list_projects`, `paperclip_create_project`, `paperclip_list_workspaces`, `paperclip_create_workspace`, `paperclip_delete_workspace` |
+| `activity.ts` | 5 | `paperclip_get_activity`, `paperclip_get_cost_summary`, `paperclip_get_costs_by_agent`, `paperclip_report_cost_event` |
+| `routines.ts` | 9 | `paperclip_list_routines`, `paperclip_create_routine`, `paperclip_add_routine_trigger`, `paperclip_run_routine`, `paperclip_list_routine_runs` |
+| `attachments.ts` | 4 | `paperclip_list_attachments`, `paperclip_upload_attachment`, `paperclip_download_attachment`, `paperclip_delete_attachment` |
+| `labels.ts` | 2 | `paperclip_list_labels`, `paperclip_create_label` |
+| `company.ts` | 5 | `paperclip_list_companies`, `paperclip_create_company`, `paperclip_update_company`, `paperclip_archive_company` |
+| `plugins.ts` | 6 | `paperclip_list_plugins`, `paperclip_install_plugin`, `paperclip_enable_plugin`, `paperclip_disable_plugin` |
+| `secrets.ts` | 4 | `paperclip_list_secrets`, `paperclip_create_secret`, `paperclip_update_secret`, `paperclip_rotate_secret` |
+| `runs.ts` | 3 | `paperclip_list_heartbeat_runs`, `paperclip_list_run_events`, `paperclip_get_run_log` |
+| `feedback.ts` | 3 | `paperclip_list_feedback_traces`, `paperclip_list_issue_feedback_traces`, `paperclip_get_feedback_trace_bundle` |
+| `company-import.ts` | 3 | `paperclip_export_company`, `paperclip_preview_company_import`, `paperclip_apply_company_import` |
+
+## ToolDefinition and ToolAnnotations interfaces
+
+These two interfaces are the contract every tool module must satisfy. They are defined in `src/tools/index.ts` and re-exported for use in handler modules:
+
+```typescript
+interface ToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;     // true → tool never modifies state
+  destructiveHint?: boolean;  // true → tool may have irreversible side-effects
+  idempotentHint?: boolean;   // true → repeated calls with same args are safe
+  openWorldHint?: boolean;    // true → tool may interact with external services
+}
+
+interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>; // JSON Schema sent to the MCP host
+  annotations?: ToolAnnotations;        // optional MCP 1.5 behavioural hints
+  handler: (args: unknown, client: PaperclipClient) => Promise<ToolResult>;
+}
+```
+
+Annotations are forwarded to the MCP host in `tools/list` responses, allowing hosts to surface safety warnings or restrict dangerous tools. All read-only tools set `readOnlyHint: true`; write tools set `destructiveHint` and `openWorldHint` as appropriate.
+
+All tool results share a single shape:
+
+```typescript
+type ToolResult = {
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+};
+```
+
+## MCP protocol integration
+
+The MCP SDK handles JSON-RPC framing over stdio. The server declares one capability — `tools` — and registers handlers for two message types.
+
+| Handler | MCP message | What it does |
+|---|---|---|
+| `ListToolsRequestSchema` | `tools/list` | Returns `name`, `description`, `inputSchema`, and `annotations` for every registered tool. Called by the host on startup. |
+| `CallToolRequestSchema` | `tools/call` | Looks up the tool by name, calls its `handler`, returns `ToolResult`. Unknown tool name → `McpError(MethodNotFound)`. |
+
+The `tools/call` dispatch sequence:
+
+<Steps>
+  <Step title="Name lookup">
+    The registry looks up `request.params.name` in `toolMap`. An unknown name raises `McpError(ErrorCode.MethodNotFound)`.
+  </Step>
+  <Step title="Input validation">
+    The handler calls `validate(Schema, args)` (Zod). Invalid arguments throw `McpError(ErrorCode.InvalidParams)`, which the SDK converts to a JSON-RPC error.
+  </Step>
+  <Step title="HTTP call">
+    The handler calls the appropriate `PaperclipClient` method (`get`, `post`, `patch`, `put`, or `delete`).
+  </Step>
+  <Step title="Result or error">
+    On success, the handler returns `{ content: [{ type: "text", text: JSON.stringify(data) }] }`. On `PaperclipApiError`, `handleApiError()` converts it to `{ isError: true, content: [...] }`. `McpError` is re-thrown to the SDK.
+  </Step>
+</Steps>
+
+## Authentication flow
+
+Environment variables are injected by the Paperclip runtime before the process starts. `src/auth.ts` reads and validates them synchronously at startup — there is no deferred validation.
+
+```
+Paperclip runtime
+      │
+      ├─ injects PAPERCLIP_API_KEY  (short-lived JWT per run)
+      ├─ injects PAPERCLIP_AGENT_ID, PAPERCLIP_COMPANY_ID
+      ├─ injects PAPERCLIP_API_URL
+      └─ injects PAPERCLIP_RUN_ID  ← ties HTTP mutations to audit trail
+
+paperclip-mcp (at startup)
+      │
+      └─ src/auth.ts reads + validates all vars
+            │
+            └─ PaperclipClient stores them in-memory
+                  │
+                  └─ Every HTTP request → Authorization: Bearer <JWT>
+                                          X-Paperclip-Run-Id: <runId>  (mutations)
+```
+
+The API key is a **run-scoped JWT** issued by the Paperclip runtime and valid only for the current heartbeat. It is never written to disk. When the heartbeat ends, the token expires.
+
+`X-Paperclip-Run-Id` is injected on all mutating requests (`POST`, `PATCH`, `PUT`, `DELETE`). The Paperclip API uses it to link each change to the originating run for auditability. Read requests (`GET`) do not require it.
+
+`src/auth.ts` reads five environment variables:
+
+| Variable | Required | Purpose |
+|---|:---:|---|
+| `PAPERCLIP_API_KEY` | Yes | Short-lived JWT injected per run |
+| `PAPERCLIP_API_URL` | Yes | Base URL for the control plane |
+| `PAPERCLIP_AGENT_ID` | Yes | Identity of the running agent |
+| `PAPERCLIP_COMPANY_ID` | Yes | Company scope for all requests |
+| `PAPERCLIP_RUN_ID` | No | Current heartbeat run ID (audit trail) |
+
+## Adding a new tool
+
+<Steps>
+  <Step title="Create or open a tool module">
+    Add a file under `src/tools/` (or open an existing one for the domain). Group related tools in one file, e.g. `src/tools/projects.ts`.
+  </Step>
+  <Step title="Define the input schema with Zod">
+    ```typescript
+    import { z } from "zod";
+
+    const ListProjectsInput = z.object({
+      status: z.string().optional(),
+    });
+    ```
+  </Step>
+  <Step title="Write the ToolDefinition">
+    ```typescript
+    import type { ToolDefinition } from "./index.js";
+    import { validate, handleApiError, toJsonSchema } from "./validation.js";
+
+    export const projectTools: ToolDefinition[] = [
+      {
+        name: "paperclip_list_projects",
+        description: "List projects for the current company.",
+        inputSchema: toJsonSchema(ListProjectsInput),
+        annotations: { readOnlyHint: true },
+        async handler(args, client) {
+          try {
+            const input = validate(ListProjectsInput, args);
+            const params = new URLSearchParams();
+            if (input.status) params.set("status", input.status);
+            const qs = params.toString();
+            const data = await client.get<unknown>(
+              `/api/companies/${client.companyId}/projects${qs ? `?${qs}` : ""}`
+            );
+            return { content: [{ type: "text", text: JSON.stringify(data) }] };
+          } catch (err) {
+            return handleApiError(err, { tool: "paperclip_list_projects", resource: "project" });
+          }
+        },
+      },
+    ];
+    ```
+  </Step>
+  <Step title="Register the tool group in src/tools/index.ts">
+    ```typescript
+    import { projectTools } from "./projects.js";
+
+    export const ALL_TOOLS: ToolDefinition[] = [
+      ...identityTools,
+      ...issueTools,
+      // ... other groups
+      ...projectTools, // ← add here
+    ];
+    ```
+    No changes to `src/index.ts` or any other file are needed.
+  </Step>
+  <Step title="Add tests (recommended)">
+    See existing `*.test.ts` files for the pattern — construct a `PaperclipClient` with a mock `fetchFn` and assert the handler output for success and error cases.
+  </Step>
+</Steps>
+
+## Extension points
+
+| What to change | Where |
+|---|---|
+| Add new tools | `src/tools/<module>.ts` + `ALL_TOOLS` in `src/tools/index.ts` |
+| Switch transport (stdio → HTTP/WS) | `src/index.ts` — swap `StdioServerTransport` |
+| Add auth schemes (OAuth, token refresh) | `src/auth.ts` and `src/client.ts` |
+| Richer error responses | Catch `PaperclipApiError` in handlers and return structured `isError` result |
+| Custom timeout enforcement | Set `PAPERCLIP_REQUEST_TIMEOUT_MS`; `PaperclipClient` reads it at construction time |

@@ -1,0 +1,240 @@
+---
+title: "Run observability tools — inspect agent heartbeat runs"
+sidebarTitle: "Runs"
+description: "Paperclip MCP run tools: list heartbeat runs, inspect run events, and retrieve full run logs to debug agent behavior and trace mutations by run ID."
+---
+
+Every time a Paperclip agent executes, it creates a **heartbeat run** — a discrete execution record that captures the run's status, timing, and a structured stream of events. Heartbeat runs are the primary unit of observability: when something goes wrong with an agent, you start by listing its runs to find a failed one, then drill into the event stream or raw log to trace exactly what happened. The environment variable `PAPERCLIP_RUN_ID` is injected into the agent's context at execution time, so every mutation the agent makes — issue updates, approvals, comment posts — is automatically tagged to the current run, making causal tracing straightforward.
+
+<Warning>
+  All three run tools are **board-only** endpoints. They require a board-level API key rather than a standard agent API key. Calls with an agent key will return `403`.
+</Warning>
+
+---
+
+## paperclip_list_heartbeat_runs
+
+List heartbeat runs for the company, optionally filtered by agent.
+
+<ParamField query="companyId" type="string" required>
+  Company UUID, e.g. `"53caad5d-05d6-469d-b6eb-8961a71b615e"`.
+</ParamField>
+
+<ParamField query="agentId" type="string">
+  Filter runs to a specific agent UUID. Omit to list runs across all agents in the company.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Max runs per page (1–100, default 50).
+</ParamField>
+
+<ParamField query="offset" type="integer">
+  Number of runs to skip for pagination (default 0).
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) returns human-readable text; `json` returns a structured object.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: HeartbeatRun[], total, count, offset, limit, has_more, next_offset }`. Each item contains `id`, `agentId`, `status`, `startedAt`, `finishedAt`.
+
+**Use when:** Auditing recent agent execution runs or diagnosing agent heartbeat failures.
+
+**Don't use when:** You need the raw event stream for a specific run — use `paperclip_list_run_events` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → this is a board-only endpoint; ensure you're using a board API key.
+
+```json
+{
+  "tool": "paperclip_list_heartbeat_runs",
+  "arguments": {
+    "companyId": "53caad5d-05d6-469d-b6eb-8961a71b615e",
+    "agentId": "agt_abc123",
+    "limit": 10,
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "items": [
+    {
+      "id": "run_xyz789",
+      "agentId": "agt_abc123",
+      "status": "failed",
+      "startedAt": "2026-04-16T09:00:01.000Z",
+      "finishedAt": "2026-04-16T09:00:07.000Z"
+    },
+    {
+      "id": "run_xyz788",
+      "agentId": "agt_abc123",
+      "status": "completed",
+      "startedAt": "2026-04-15T09:00:01.000Z",
+      "finishedAt": "2026-04-15T09:00:44.000Z"
+    }
+  ],
+  "total": 2,
+  "count": 2,
+  "offset": 0,
+  "limit": 10,
+  "has_more": false,
+  "next_offset": null
+}
+```
+
+---
+
+## paperclip_list_run_events
+
+Stream structured events for a heartbeat run using a cursor-based `afterSeq` approach.
+
+<ParamField query="runId" type="string" required>
+  Heartbeat run UUID to inspect, e.g. `"run_xyz789"`.
+</ParamField>
+
+<ParamField query="afterSeq" type="integer">
+  Return only events with `seq > afterSeq`. Use this as a cursor to resume streaming from where you left off. Defaults to `0` (start of run).
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Max events to return in one call (default 100). This is cursor-based, not page-based — there is no `offset`.
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** An array of run events (no pagination envelope). Each event contains `seq`, `type`, `data`, `createdAt`. Use the highest `seq` from the returned batch as `afterSeq` in the next call to advance the cursor.
+
+**Use when:** Streaming execution events for a live or recently completed heartbeat run.
+
+**Don't use when:** You need raw log bytes — use `paperclip_get_run_log` with `offset`/`limitBytes` instead.
+
+<Tip>
+  To tail a live run, call `paperclip_list_run_events` in a loop. On each call, pass the `seq` of the last received event as `afterSeq`. Stop when the run's `status` (from `paperclip_list_heartbeat_runs`) transitions to `completed` or `failed` and the event batch is empty.
+</Tip>
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → board-only endpoint; ensure you're using a board API key.
+- `404` — Run not found → verify `runId` with `paperclip_list_heartbeat_runs`.
+
+```json
+{
+  "tool": "paperclip_list_run_events",
+  "arguments": {
+    "runId": "run_xyz789",
+    "afterSeq": 0,
+    "limit": 50,
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+[
+  {
+    "seq": 1,
+    "type": "tool_call",
+    "data": { "tool": "paperclip_get_dashboard", "args": {} },
+    "createdAt": "2026-04-16T09:00:01.120Z"
+  },
+  {
+    "seq": 2,
+    "type": "tool_result",
+    "data": { "status": "ok" },
+    "createdAt": "2026-04-16T09:00:02.340Z"
+  },
+  {
+    "seq": 3,
+    "type": "error",
+    "data": { "message": "Rate limit exceeded", "code": 429 },
+    "createdAt": "2026-04-16T09:00:07.001Z"
+  }
+]
+```
+
+To continue from this batch: `"afterSeq": 3`.
+
+---
+
+## paperclip_get_run_log
+
+Read raw log bytes for a heartbeat run using a byte-offset cursor.
+
+<ParamField query="runId" type="string" required>
+  Heartbeat run UUID whose log to retrieve, e.g. `"run_xyz789"`.
+</ParamField>
+
+<ParamField query="offset" type="integer">
+  Byte offset into the log to start reading from (default `0`). Use `nextOffset` from the previous response to advance.
+</ParamField>
+
+<ParamField query="limitBytes" type="integer">
+  Maximum bytes to return per call (default `16384` = 16 KiB).
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** A log slice object: `{ content: string, nextOffset: number, totalBytes: number }`. Pass `nextOffset` as `offset` in the next call to read the following slice.
+
+**Use when:** Reading raw execution log output for a heartbeat run — useful when the structured event stream lacks the detail you need.
+
+**Don't use when:** You need structured events — use `paperclip_list_run_events` with the `afterSeq` cursor instead.
+
+<Note>
+  Log reads are not paginated in the traditional sense — they use a byte-offset cursor. Each call returns at most `limitBytes` bytes starting at `offset`. When `nextOffset === totalBytes`, you've reached the end of the log.
+</Note>
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → board-only endpoint; ensure you're using a board API key.
+- `404` — Run not found → verify `runId` with `paperclip_list_heartbeat_runs`.
+
+```json
+{
+  "tool": "paperclip_get_run_log",
+  "arguments": {
+    "runId": "run_xyz789",
+    "offset": 0,
+    "limitBytes": 16384,
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "content": "[09:00:01] Agent started\n[09:00:02] Calling paperclip_get_dashboard\n[09:00:07] ERROR: Rate limit exceeded (429)\n",
+  "nextOffset": 112,
+  "totalBytes": 112
+}
+```
+
+In this example `nextOffset === totalBytes`, so the full log has been read in one slice.
+
+---
+
+## Debugging workflow
+
+Use the three run tools together to trace an agent failure from first principles:
+
+<Steps>
+  <Step title="Find the failing run">
+    Call `paperclip_list_heartbeat_runs` filtered by `agentId`. Look for runs with `status: "failed"` and note the `id`.
+  </Step>
+  <Step title="Stream the event sequence">
+    Call `paperclip_list_run_events` with the failed `runId` and `afterSeq: 0`. Scan for `type: "error"` events to identify the failure point and sequence number.
+  </Step>
+  <Step title="Read the raw log">
+    If the event stream lacks enough context, call `paperclip_get_run_log` with `offset: 0`. Advance `offset` by `limitBytes` on each call until `nextOffset === totalBytes`.
+  </Step>
+</Steps>

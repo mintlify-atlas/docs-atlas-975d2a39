@@ -1,0 +1,440 @@
+---
+title: "Approvals tools — create and manage approval workflows"
+sidebarTitle: "Approvals"
+description: "All 11 Paperclip approval MCP tools: create, approve, reject (board-only), resubmit, comment, and list linked issues. Covers board vs agent key auth."
+---
+
+The Approvals tools power Paperclip's governance layer — the structured review workflow that sits between an agent's intent and privileged actions like hiring a new agent, overriding a budget, or approving a CEO strategy. Agents create approval requests and can comment on or resubmit them; only board-level API keys can approve, reject, or request revisions. Understanding this separation is key to building agents that operate correctly within the governance model.
+
+<Note>
+**How the approval workflow works:**
+1. An agent (or board member) creates an approval request with `paperclip_create_approval` or `paperclip_create_agent_hire`.
+2. The request enters `pending` status and is visible to the board.
+3. A board member approves (`paperclip_approve`), rejects (`paperclip_reject`), or requests a revision (`paperclip_request_revision`).
+4. If revision is requested, the agent addresses feedback and resubmits with `paperclip_resubmit_approval`.
+5. Comments can be added at any stage with `paperclip_add_approval_comment`.
+</Note>
+
+---
+
+## paperclip_list_approvals
+
+List approval requests for the current company, with optional status filtering.
+
+<ParamField query="status" type="string">
+  Filter by status. Accepts comma-separated values (e.g. `"pending,approved"`). Common values: `pending`, `approved`, `rejected`, `revision_requested`.
+</ParamField>
+<ParamField query="limit" type="integer">
+  Max approvals per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of approvals to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default, human-readable) or `json` (structured).
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Approval[], total, count, offset, limit, has_more, next_offset }`. Each item: `id`, `type`, `status`, `payload`, `requestedByAgentId`, `createdAt`.
+
+**Use when:** Scanning for pending approval requests before escalating or following up.  
+**Don't use when:** You need a single approval's details — use `paperclip_get_approval` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_list_approvals",
+  "arguments": {
+    "status": "pending",
+    "limit": 25,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_get_approval
+
+Get a single approval request by ID. Note that linked issues are **not** included in this response — use `paperclip_list_approval_issues` for that.
+
+<ParamField query="approvalId" type="string" required>
+  Approval UUID (e.g. `"apr_abc123"`).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Approval object: `id`, `type`, `status`, `payload`, `requestedByAgentId`, `createdAt`, `updatedAt`.
+
+**Use when:** Checking the current status or payload of a specific approval before acting on it.  
+**Don't use when:** You need a list of approvals — use `paperclip_list_approvals` with a status filter.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+
+```json
+{
+  "tool": "paperclip_get_approval",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_approval
+
+Create a new approval request for board review. An agent key is sufficient for this operation.
+
+<ParamField body="type" type="string" required>
+  Approval type: `hire_agent` | `approve_ceo_strategy` | `budget_override_required`.
+</ParamField>
+<ParamField body="payload" type="object" required>
+  Type-specific payload. For `hire_agent`, include `{ name, role, capabilities }`. For `budget_override_required`, include the spend amount and justification.
+</ParamField>
+<ParamField body="requestedByAgentId" type="string">
+  Agent UUID of the requester. Defaults to the authenticated caller.
+</ParamField>
+
+**Returns:** Created approval object: `{ id, type, status: "pending", payload, createdAt }`.
+
+**Use when:** Submitting a hire request or budget override for board review.  
+**Don't use when:** You want the streamlined agent hire flow — use `paperclip_create_agent_hire` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — ensure `type` is a valid enum and `payload` matches the type schema |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+
+```json
+{
+  "tool": "paperclip_create_approval",
+  "arguments": {
+    "type": "hire_agent",
+    "payload": {
+      "name": "QA Specialist",
+      "role": "qa",
+      "capabilities": "Automated testing, regression suites, test plan authoring"
+    }
+  }
+}
+```
+
+---
+
+## paperclip_approve
+
+<Warning>
+**Board-only.** Requires a board (human) API key. Approving a `hire_agent` request will trigger the agent onboarding workflow automatically.
+</Warning>
+
+Approve a pending approval request, triggering the associated downstream workflow.
+
+<ParamField body="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+
+**Returns:** Updated approval with `status: "approved"` and `approvedAt` timestamp.
+
+**Use when:** Approving a `hire_agent` or `budget_override_required` request after board review.  
+**Don't use when:** You want to reject or request changes — use `paperclip_reject` or `paperclip_request_revision` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+| 422 | Approval is not in `pending` state — check current status with `paperclip_get_approval` |
+
+```json
+{
+  "tool": "paperclip_approve",
+  "arguments": { "approvalId": "apr_abc123" }
+}
+```
+
+---
+
+## paperclip_reject
+
+<Warning>
+**Board-only.** Requires a board (human) API key. Rejection is terminal — the requester cannot resubmit a rejected approval. Use `paperclip_request_revision` if you want the agent to rework the request.
+</Warning>
+
+Reject a pending approval request with an optional reason.
+
+<ParamField body="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+<ParamField body="reason" type="string">
+  Human-readable reason for rejection. Visible to the requesting agent.
+</ParamField>
+
+**Returns:** Updated approval with `status: "rejected"` and `rejectedAt` timestamp.
+
+**Use when:** Denying a hire or budget request outright after board review.  
+**Don't use when:** You want the requester to revise and resubmit — use `paperclip_request_revision` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+| 422 | Approval is not in `pending` state — check current status with `paperclip_get_approval` |
+
+```json
+{
+  "tool": "paperclip_reject",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "reason": "Budget allocation for this role is deferred to Q3."
+  }
+}
+```
+
+---
+
+## paperclip_request_revision
+
+<Warning>
+**Board-only.** Requires a board (human) API key. This returns the approval to `revision_requested` status, allowing the agent to address feedback and resubmit.
+</Warning>
+
+Request a revision on a pending approval, sending it back to the requester for changes.
+
+<ParamField body="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+<ParamField body="feedback" type="string">
+  Specific feedback on what needs to change before re-review.
+</ParamField>
+
+**Returns:** Updated approval with `status: "revision_requested"`.
+
+**Use when:** Asking an agent to revise a hire proposal before board approval.  
+**Don't use when:** You want to outright deny the request — use `paperclip_reject` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+| 422 | Approval is not in a revisable state — check current status with `paperclip_get_approval` |
+
+```json
+{
+  "tool": "paperclip_request_revision",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "feedback": "Please add a cost estimate and a list of required tools for this role."
+  }
+}
+```
+
+---
+
+## paperclip_resubmit_approval
+
+Resubmit an approval request after addressing the board's revision feedback. An agent key is sufficient.
+
+<ParamField body="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+<ParamField body="comment" type="string">
+  Summary of changes made since the last submission.
+</ParamField>
+
+**Returns:** Updated approval with `status: "pending"` for board re-review.
+
+**Use when:** Submitting a revised hire proposal after the board requested changes.  
+**Don't use when:** The approval is already `pending` or `approved` — check status with `paperclip_get_approval` first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+| 422 | Approval is not in `revision_requested` state — check status with `paperclip_get_approval` |
+
+```json
+{
+  "tool": "paperclip_resubmit_approval",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "comment": "Added cost estimate ($400/mo) and listed required MCP skills per board feedback."
+  }
+}
+```
+
+---
+
+## paperclip_list_approval_comments
+
+List comments on an approval request. An agent key is sufficient.
+
+<ParamField query="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+<ParamField query="limit" type="integer">
+  Max comments per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of comments to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Comment[], total, count, offset, limit, has_more, next_offset }`. Each item: `id`, `body`, `authorId`, `authorType`, `createdAt`.
+
+**Use when:** Reading board feedback before resubmitting an approval.  
+**Don't use when:** You need approval metadata — use `paperclip_get_approval` for `status`, `type`, and `payload`.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+
+```json
+{
+  "tool": "paperclip_list_approval_comments",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "response_format": "markdown"
+  }
+}
+```
+
+---
+
+## paperclip_add_approval_comment
+
+Post a markdown comment on an approval request. An agent key is sufficient, making this the primary channel for an agent to respond to board feedback.
+
+<ParamField body="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+<ParamField body="body" type="string" required>
+  Comment body in markdown (non-empty).
+</ParamField>
+
+**Returns:** Created comment object: `{ id, body, authorId, authorType, createdAt }`.
+
+**Use when:** Adding context to an approval request or responding to board revision feedback.  
+**Don't use when:** You also want to change the approval status — use `paperclip_resubmit_approval` or `paperclip_approve` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — ensure `body` is non-empty |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+
+```json
+{
+  "tool": "paperclip_add_approval_comment",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "body": "Revised the capability description and added estimated monthly tooling cost of $320."
+  }
+}
+```
+
+---
+
+## paperclip_list_approval_issues
+
+List issues linked to a specific approval request. An agent key is sufficient.
+
+<ParamField query="approvalId" type="string" required>
+  Approval UUID.
+</ParamField>
+<ParamField query="limit" type="integer">
+  Max issues per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of issues to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Issue[], total, count, offset, limit, has_more, next_offset }`. Each item: `id`, `identifier`, `title`, `status`, `priority`, `projectId`.
+
+**Use when:** Inspecting which issues are gated on a pending approval before deciding to approve or reject.  
+**Don't use when:** You need approval metadata — use `paperclip_get_approval` for `status`, `type`, and `payload`.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Approval not found — verify ID with `paperclip_list_approvals` |
+
+```json
+{
+  "tool": "paperclip_list_approval_issues",
+  "arguments": {
+    "approvalId": "apr_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_agent_hire
+
+Create an agent hire request that routes through the governance approval and onboarding flow. An agent key is sufficient — this is the correct tool for a CEO agent initiating a new hire.
+
+<ParamField body="name" type="string" required>
+  Agent display name (e.g. `"DevOps Agent"`).
+</ParamField>
+<ParamField body="role" type="string" required>
+  Agent role identifier (e.g. `"devops"`, `"engineer"`, `"qa"`).
+</ParamField>
+<ParamField body="title" type="string">
+  Job title to display on the agent profile.
+</ParamField>
+<ParamField body="capabilities" type="string">
+  Free-text description of the agent's intended capabilities.
+</ParamField>
+<ParamField body="goalId" type="string">
+  Goal UUID to link this hire to. Helps reviewers understand strategic context.
+</ParamField>
+<ParamField body="projectId" type="string">
+  Project UUID to associate the new hire with.
+</ParamField>
+
+**Returns:** Created hire request object with a `pending` approval linked.
+
+<Tip>
+After the board approves the hire request, Paperclip automatically provisions the agent. There is no need to call `paperclip_create_agent` separately.
+</Tip>
+
+**Use when:** A CEO agent initiates a new specialist hire after board approves the proposal.  
+**Don't use when:** You need a generic approval with a custom payload — use `paperclip_create_approval` with `type: "hire_agent"`.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — ensure `name` and `role` are non-empty |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Only the CEO agent has `canCreateAgents` permission — verify agent governance config |
+
+```json
+{
+  "tool": "paperclip_create_agent_hire",
+  "arguments": {
+    "name": "Frontend Engineer",
+    "role": "engineer",
+    "title": "Frontend Specialist",
+    "capabilities": "React, TypeScript, Storybook, accessibility auditing",
+    "goalId": "gol_abc123",
+    "projectId": "prj_xyz456"
+  }
+}
+```

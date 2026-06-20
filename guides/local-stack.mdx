@@ -1,0 +1,301 @@
+---
+title: "Run the full Paperclip stack locally with Compose"
+sidebarTitle: "Local Stack"
+description: "Set up a local Paperclip control plane server plus the MCP server using podman-compose or docker-compose for development and testing."
+---
+
+Running the full Paperclip stack locally lets you develop agent workflows against a real control plane without touching a production environment. The compose files ship two configurations: a **default stack** using an embedded PGlite database (zero configuration required), and an **external-db profile** that adds a full PostgreSQL container for teams needing a durable relational backend. The MCP server (`paperclip-mcp`) is not a compose service — it is a stdio subprocess spawned by Claude Code that communicates with the running Paperclip server over HTTP.
+
+## Prerequisites
+
+| Requirement | Minimum version | Check |
+|---|---|---|
+| Podman | 3.4 | `podman --version` |
+| podman-compose | 1.0 | `podman-compose --version` |
+| Docker (alternative) | 20.10 | `docker --version` |
+| docker compose plugin (alternative) | v2.1 | `docker compose version` |
+| Free RAM | 2 GB | — |
+| Free disk | 1 GB | — |
+
+<Warning>
+  Podman versions below 3.4 have known limitations with `network_mode: host` in rootless mode. Upgrade Podman before proceeding if you are on an older version.
+</Warning>
+
+## What the compose stack includes
+
+Both `podman-compose.yaml` and `docker-compose.yaml` define the same two services:
+
+| Service | Container name | Image | Profile |
+|---|---|---|---|
+| `paperclip` | `paperclip` | `ghcr.io/paperclipai/paperclip:${PAPERCLIP_VERSION}` | Always active |
+| `postgres` | `paperclip-postgres` | `docker.io/library/postgres:${POSTGRES_VERSION:-17.9-alpine}` | `external-db` only |
+
+Both services run with `network_mode: host`. The Paperclip server binds to `127.0.0.1:3100` (configurable via `PORT`). Telemetry is disabled by default (`PAPERCLIP_TELEMETRY_DISABLED=1`).
+
+**Named volumes:**
+
+| Volume | Mounted at | Contents |
+|---|---|---|
+| `paperclip-data` | `/paperclip` | Embedded PGlite database, uploaded files, secrets, workspace data |
+| `paperclip-pg-data` | `/var/lib/postgresql/data` | PostgreSQL data directory (external-db profile only) |
+
+## Starting the stack
+
+<Steps>
+
+### Copy and configure the env file
+
+```bash
+cp .env.example .env
+$EDITOR .env
+```
+
+Set `BETTER_AUTH_SECRET` to any string of at least 32 characters. The server will refuse to start without it — even in `local_trusted` mode.
+
+```bash
+# Generate a strong secret:
+openssl rand -base64 32
+```
+
+### Start the default stack (embedded PGlite)
+
+<CodeGroup>
+
+```bash Podman
+podman-compose -f podman-compose.yaml up -d
+```
+
+```bash Docker
+docker compose -f docker-compose.yaml up -d
+```
+
+</CodeGroup>
+
+The server applies database migrations on first boot. Allow up to 30 seconds on slower machines.
+
+### Verify the server is healthy
+
+```bash
+curl -s http://localhost:3100/api/health
+# Expected: HTTP 200 with a JSON body indicating healthy status.
+```
+
+The container healthcheck runs `wget -qO- http://127.0.0.1:${PORT:-3100}/api/health` every 15 seconds with a 30-second start period. The container shows `(health: starting)` during migrations — this is normal.
+
+</Steps>
+
+## Environment variables
+
+The following variables are read from `.env` (or the host environment):
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BETTER_AUTH_SECRET` | **Yes** | — | Auth secret, minimum 32 characters. Server throws at startup if absent. |
+| `PAPERCLIP_VERSION` | No | `sha-b8725c5` | Image tag for the Paperclip server. |
+| `PORT` | No | `3100` | HTTP port the server binds to. |
+| `PAPERCLIP_DEPLOYMENT_MODE` | No | `local_trusted` | Deployment mode. `local_trusted` removes auth overhead for local dev. |
+| `SERVE_UI` | No | `true` | Serve the React dashboard from the same process. |
+| `PAPERCLIP_TELEMETRY_DISABLED` | No | `1` | Set to `1` to disable telemetry (also honours `DO_NOT_TRACK=1`). |
+| `DATABASE_URL` | No (external-db only) | — | PostgreSQL connection string, e.g. `postgres://paperclip:CHANGE_ME@127.0.0.1:5432/paperclip`. |
+| `POSTGRES_PASSWORD` | No (external-db only) | — | Required when using the `external-db` profile. |
+| `POSTGRES_USER` | No | `paperclip` | PostgreSQL user. |
+| `POSTGRES_DB` | No | `paperclip` | PostgreSQL database name. |
+| `POSTGRES_PORT` | No | `5432` | PostgreSQL port. |
+
+## External PostgreSQL (optional)
+
+The `external-db` profile adds a `postgres` service. Use this when you need a full relational backend — for larger teams or when you want to inspect the database directly.
+
+<Warning>
+  Before switching from embedded PGlite to external PostgreSQL, start with a fresh `paperclip-data` volume. Existing embedded PGlite data is **not** automatically migrated to PostgreSQL. Wipe both volumes together if you are switching modes.
+</Warning>
+
+In `.env`, set or uncomment:
+
+```bash
+BETTER_AUTH_SECRET=<32+ chars>
+DATABASE_URL=postgres://paperclip:CHANGE_ME@127.0.0.1:5432/paperclip
+POSTGRES_PASSWORD=CHANGE_ME
+# POSTGRES_USER=paperclip   # default
+# POSTGRES_DB=paperclip     # default
+```
+
+Then start with the profile:
+
+<CodeGroup>
+
+```bash Podman
+podman-compose -f podman-compose.yaml --profile external-db up -d
+```
+
+```bash Docker
+docker compose -f docker-compose.yaml --profile external-db up -d
+```
+
+</CodeGroup>
+
+Both services run in the host network namespace, so Paperclip reaches PostgreSQL on `127.0.0.1:5432` without any port publishing. Paperclip has built-in retry logic and connects as soon as PostgreSQL is ready (expect ~5–10 seconds of `ECONNREFUSED` log noise before the first successful migration query — this is harmless and self-recovering).
+
+## Connecting Claude Code to the local stack
+
+`paperclip-mcp` is a stdio subprocess — not a compose service. Add the following to your Claude Code `.mcp.json` to point it at the local server:
+
+```json
+{
+  "mcpServers": {
+    "paperclip": {
+      "command": "podman",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network=host",
+        "-e",
+        "PAPERCLIP_API_KEY",
+        "-e",
+        "PAPERCLIP_API_URL=http://127.0.0.1:3100",
+        "-e",
+        "PAPERCLIP_AGENT_ID",
+        "-e",
+        "PAPERCLIP_COMPANY_ID",
+        "ghcr.io/bruhsb/paperclip-mcp:2.1.0"
+      ],
+      "env": {
+        "PAPERCLIP_API_KEY": "<your-agent-key>",
+        "PAPERCLIP_AGENT_ID": "<your-agent-uuid>",
+        "PAPERCLIP_COMPANY_ID": "<your-company-uuid>"
+      }
+    }
+  }
+}
+```
+
+<Note>
+  `--network=host` is required so the containerized MCP process can reach `http://127.0.0.1:3100` on the host loopback. The image tag should match `MCP_VERSION` in your `.env`.
+</Note>
+
+## Common operations
+
+```bash
+# Tail logs for the paperclip service
+podman-compose -f podman-compose.yaml logs -f paperclip
+
+# Restart the paperclip service
+podman-compose -f podman-compose.yaml restart paperclip
+
+# Open a shell inside the running container
+podman exec -it paperclip sh
+
+# List pulled images
+podman images | grep paperclip
+
+# List named volumes
+podman volume ls | grep paperclip
+
+# Manually test the health endpoint
+podman exec paperclip wget -qO- http://127.0.0.1:3100/api/health
+```
+
+## Version upgrades
+
+<Steps>
+
+### Check the release for the new version's git SHA
+
+```bash
+skopeo list-tags docker://ghcr.io/paperclipai/paperclip | grep <short-sha>
+```
+
+### Update PAPERCLIP_VERSION in .env
+
+```bash
+PAPERCLIP_VERSION=sha-<new-sha>
+```
+
+### Pull and restart
+
+<CodeGroup>
+
+```bash Podman
+podman-compose -f podman-compose.yaml pull
+podman-compose -f podman-compose.yaml up -d
+```
+
+```bash Docker
+docker compose -f docker-compose.yaml pull
+docker compose -f docker-compose.yaml up -d
+```
+
+</CodeGroup>
+
+</Steps>
+
+## Stopping and cleanup
+
+```bash
+# Stop and remove containers — volumes are preserved, data is safe.
+podman-compose -f podman-compose.yaml down
+```
+
+<Warning>
+  The `-v` flag removes **all** named volumes. This deletes the embedded database, uploaded files, secrets, and all workspace data. You will start with a blank Paperclip installation on the next `up`. **This cannot be undone.**
+
+  ```bash
+  # DESTRUCTIVE — only run if you want a completely clean slate:
+  podman-compose -f podman-compose.yaml down -v
+  ```
+
+  If you use the `external-db` profile, always wipe both `paperclip-data` **and** `paperclip-pg-data` together (or neither). The `master.key` stored in `paperclip-data` must match the encrypted secrets in the database — partial wipes will break secret decryption on restart.
+</Warning>
+
+## Troubleshooting
+
+<Accordion title="Server fails to start: auth-secret error">
+  ```
+  BETTER_AUTH_SECRET (or PAPERCLIP_AGENT_JWT_SECRET) must be set.
+  ```
+
+  `BETTER_AUTH_SECRET` is mandatory in all deployment modes, including `local_trusted`. Set it in `.env` to any string of at least 32 characters:
+
+  ```bash
+  openssl rand -base64 32
+  ```
+</Accordion>
+
+<Accordion title="Port conflict on 3100">
+  Another process is listening on port 3100. Find and stop it:
+
+  ```bash
+  ss -tlnp | grep 3100
+  # or
+  lsof -i :3100
+  ```
+
+  Alternatively, set `PORT` in `.env` to a different port and update `PAPERCLIP_API_URL` in `.mcp.json` to match.
+</Accordion>
+
+<Accordion title="Rootless UID mismatch — permission denied on volume">
+  If you see `EACCES: permission denied, mkdir '/paperclip/...'` in container logs, the volume mount path or ownership is incorrect. The Paperclip image runs as the `node` user (UID 1000). The `/paperclip` directory is pre-owned by `node:node` in the image, so named volumes require no extra `chown` step — but the volume must mount at `/paperclip`, not `/root/.paperclip`.
+
+  Ensure `PAPERCLIP_HOME=/paperclip` (the default in both compose files). For a clean start:
+
+  ```bash
+  podman-compose -f podman-compose.yaml down -v
+  podman-compose -f podman-compose.yaml up -d
+  ```
+</Accordion>
+
+<Accordion title="Healthcheck failing / container stuck in (health: starting)">
+  First boot runs all database migrations. Allow up to 30 seconds (`start_period: 30s` is set in the healthcheck). If the container remains unhealthy after 2–3 minutes:
+
+  ```bash
+  podman logs paperclip
+  podman exec paperclip wget -qO- http://127.0.0.1:3100/api/health
+  ```
+
+  Common causes: missing `BETTER_AUTH_SECRET`, `DATABASE_URL` pointing to an unreachable host, or a stale volume from a failed previous run (try `down -v` for a clean start).
+</Accordion>
+
+<Accordion title="SELinux permission denied (Fedora / RHEL)">
+  If Podman reports an SELinux denial when accessing the volume, verify that the volume mounts in `podman-compose.yaml` include `:Z`. The `:Z` label sets the SELinux private unshared context on the volume's backing directory. It is present in the provided `podman-compose.yaml` by default. The `docker-compose.yaml` omits `:Z` intentionally — Docker Desktop does not require it.
+</Accordion>

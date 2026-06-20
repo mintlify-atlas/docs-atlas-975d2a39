@@ -1,0 +1,112 @@
+---
+title: "Paperclip MCP: MCP Server for the Paperclip Control Plane"
+sidebarTitle: "Introduction"
+description: "Paperclip MCP is a stdio MCP server exposing 104 Paperclip API tools to Claude Code agents for managing issues, agents, approvals, and workflows."
+---
+
+Paperclip MCP is a [Model Context Protocol](https://modelcontextprotocol.io) server that bridges Claude Code agents to the [Paperclip](https://paperclip.ing) control plane API. Instead of writing raw HTTP calls, your agent simply invokes named tools — `paperclip_checkout_issue`, `paperclip_add_comment`, `paperclip_approve_request` — and the server handles authentication, request serialization, run-ID injection, and error normalization transparently. The result is a clean, auditable interface between AI agents and the Paperclip control plane, with 104 tools spanning 19 domains from identity and issues through approvals, secrets, and observability.
+
+## How it works
+
+Paperclip MCP runs as a **stdio process** alongside your MCP host (Claude Code or any compatible host). The host communicates with it over **JSON-RPC 2.0** on stdin/stdout — the standard MCP transport. Every tool call the host makes is translated into an authenticated **HTTP request** to the Paperclip API, and the response is returned as structured JSON content.
+
+```
+┌────────────────────┐     JSON-RPC / stdio     ┌─────────────────────────┐     HTTPS/HTTP     ┌──────────────────────┐
+│   MCP Host         │ ◄──────────────────────► │   paperclip-mcp server  │ ──────────────────► │   Paperclip API      │
+│  (Claude Code)     │   tools/list             │   src/index.ts          │   Bearer token auth │   control plane      │
+│                    │   tools/call             │   registerAllTools()    │   X-Paperclip-Run-Id│                      │
+└────────────────────┘                          └─────────────────────────┘                     └──────────────────────┘
+```
+
+At startup, `src/index.ts` creates an MCP `Server`, calls `registerAllTools(server)` to wire up all 104 tool handlers, then connects a `StdioServerTransport`. The `getAuthConfig()` function in `src/auth.ts` reads all required environment variables and **exits immediately** if any are missing — there is no deferred failure.
+
+## MCP Protocol handlers
+
+The server registers two standard MCP handlers:
+
+- **`tools/list`** — returns the full catalogue of 104 tool definitions with their names, descriptions, and Zod-validated JSON schemas, so the host can present them to the model.
+- **`tools/call`** — dispatches a named tool call to the matching handler, executes the Paperclip API request, and returns `{ content: [{ type: "text", text: "..." }], isError: false }`. On any API error, `isError` is set to `true` and `content[0].text` contains a human-readable message — the host never receives an uncaught exception.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="104 tools across 19 domains" icon="grid-2">
+    Full coverage of the Paperclip control plane: issues, comments, documents, agents, approvals, goals, projects, routines, attachments, labels, secrets, plugins, observability, and more.
+  </Card>
+  <Card title="Automatic run-ID injection" icon="link">
+    When `PAPERCLIP_RUN_ID` is set, the server adds `X-Paperclip-Run-Id` to every mutating request (POST, PATCH, PUT, DELETE), linking each write action to the current heartbeat run for a complete audit trail.
+  </Card>
+  <Card title="Fail-fast env var validation" icon="shield-check">
+    The server validates all four required environment variables at process startup and exits with a clear error message before accepting any connections. No silent misconfiguration at call time.
+  </Card>
+  <Card title="Docker & Podman support" icon="docker">
+    Published to `ghcr.io/bruhsb/paperclip-mcp:2.1.0`. Run the full Paperclip stack — control plane plus MCP server — as a compose stack without any Node.js installation.
+  </Card>
+  <Card title="Two API key types" icon="key">
+    **Agent keys** are scoped to a single agent identity and cover everyday tools. **Board keys** are operator-scoped and required for elevated tools (approvals, agent management). The right key type is enforced server-side.
+  </Card>
+  <Card title="Operator-configured heartbeat runs" icon="clock">
+    In Paperclip's heartbeat model, the control plane injects all required env vars — including a short-lived run JWT — automatically. The agent receives a fully-configured MCP server without manual setup.
+  </Card>
+</CardGroup>
+
+## Tool domains
+
+The 104 tools are organized across 19 domains. Every tool name is prefixed with `paperclip_` to avoid collisions with other MCP servers.
+
+| Domain | Tools | Example tools |
+|---|---|---|
+| Identity | 4 | `paperclip_get_me`, `paperclip_get_inbox` |
+| Issues | 7 | `paperclip_checkout_issue`, `paperclip_update_issue`, `paperclip_release_issue` |
+| Comments | 3 | `paperclip_add_comment`, `paperclip_list_comments` |
+| Documents | 5 | `paperclip_create_document`, `paperclip_get_document` |
+| Agents & Organization | 17 | `paperclip_list_agents`, `paperclip_get_agent` |
+| Dashboard | 1 | `paperclip_get_dashboard` |
+| Approvals | 11 | `paperclip_request_approval`, `paperclip_approve_request` |
+| Goals | 4 | `paperclip_list_goals`, `paperclip_get_goal` |
+| Projects & Workspaces | 8 | `paperclip_list_projects`, `paperclip_create_project` |
+| Activity & Costs | 5 | `paperclip_get_activity`, `paperclip_get_costs` |
+| Routines | 9 | `paperclip_list_routines`, `paperclip_run_routine` |
+| Attachments | 4 | `paperclip_upload_attachment` |
+| Labels | 2 | `paperclip_list_labels` |
+| Companies | 5 | `paperclip_get_company` |
+| Plugins | 6 | `paperclip_list_plugins` |
+| Secrets | 4 | `paperclip_get_secret` |
+| Run Observability | 3 | `paperclip_get_heartbeat_context` |
+| Feedback Traces | 3 | `paperclip_create_feedback_trace` |
+| Company Import / Export | 3 | `paperclip_export_company` |
+
+## Architecture internals
+
+The server is structured around a small set of focused modules:
+
+- **`src/index.ts`** — entry point; creates the MCP `Server`, registers all tools, connects `StdioServerTransport`.
+- **`src/auth.ts`** — reads and validates all required env vars at startup; exported as `PaperclipAuth`.
+- **`src/client.ts`** — `PaperclipClient`: typed HTTP wrapper with `get`, `post`, `patch`, `put`, `delete` methods. Injects `Authorization: Bearer` on every request and `X-Paperclip-Run-Id` on all mutations.
+- **`src/tools/index.ts`** — aggregates all `ToolDefinition[]` arrays from domain modules into `ALL_TOOLS`, builds the dispatch map, and registers `ListTools` / `CallTool` handlers.
+- **`src/errors.ts`** — `PaperclipApiError` wraps non-2xx HTTP responses with status and message.
+
+## Who it's for
+
+Paperclip MCP is designed for three primary audiences:
+
+1. **Claude Code agents running inside Paperclip** — agents that wake up on heartbeat or @-mention and need to read their inbox, check out issues, post comments, and advance workflows without writing any HTTP code.
+2. **Operators configuring automated agent runs** — platform teams that wire up MCP servers in CI/CD pipelines or scheduled Paperclip heartbeat runs, where all env vars are injected by the runtime.
+3. **Developers building on Paperclip** — engineers who want to give Claude Code local access to a self-hosted Paperclip instance for interactive control-plane operations during development.
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Install via npx, Docker, or npm and make your first tool call in under 5 minutes.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation/overview">
+    Host-specific setup guides for Claude Code, Claude Desktop, Cursor, VS Code, and Windsurf.
+  </Card>
+  <Card title="Tools reference" icon="wrench" href="/tools/overview">
+    Complete per-tool reference with parameters, schemas, and example responses.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/guides/authentication">
+    How to generate API keys, understand key scopes, and configure auth for heartbeat runs.
+  </Card>
+</CardGroup>

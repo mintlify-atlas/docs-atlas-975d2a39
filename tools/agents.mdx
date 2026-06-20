@@ -1,0 +1,694 @@
+---
+title: "Agents tools — manage the Paperclip agent org chart"
+sidebarTitle: "Agents"
+description: "All 17 Paperclip agent MCP tools: list, create, update, pause, resume, terminate agents, manage keys and config revisions, and view the org chart."
+---
+
+The Agents tools give Claude Code direct control over the full lifecycle of every agent in your Paperclip company — from listing and inspecting existing agents, to creating, configuring, pausing, and permanently terminating them. They also cover org-chart visibility, heartbeat management, API key issuance, config-revision history and rollback, instructions file paths, and skills sync. Several of the most powerful operations (create, terminate, permissions update, key issuance, rollback, and instructions-path changes) are restricted to **board-level API keys** and will return `403 Forbidden` when called with an agent key.
+
+<Note>
+**Auth levels at a glance.** Most read-only and heartbeat tools accept any valid API key. Mutation tools that affect other agents require a **board (human) API key** set in `PAPERCLIP_API_KEY`. An agent key is sufficient only for its own heartbeat (`paperclip_invoke_heartbeat`) and skills sync (`paperclip_sync_agent_skills`).
+</Note>
+
+---
+
+## paperclip_list_agents
+
+List all agents in the current company with optional pagination.
+
+<ParamField query="limit" type="integer">
+  Max agents per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of agents to skip for pagination (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default, human-readable) or `json` (structured).
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Agent[], total, count, offset, limit, has_more, next_offset }`.
+
+**Use when:** Resolving an agent name to a UUID before assigning an issue or invoking a heartbeat.  
+**Don't use when:** You already have the ID and need full config — use `paperclip_get_agent` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_list_agents",
+  "arguments": {
+    "limit": 20,
+    "offset": 0,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_get_agent
+
+Get full details for a single agent by UUID.
+
+<ParamField query="agentId" type="string" required>
+  Agent UUID (e.g. `"agt_abc123"`).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Agent object: `id`, `name`, `urlKey`, `role`, `title`, `status`, `capabilities`, `runtimeConfig`, `adapterConfig`, `permissions`, `budget`.
+
+**Use when:** Reading an agent's current config before updating it or checking its heartbeat settings.  
+**Don't use when:** You need a list — use `paperclip_list_agents` to discover IDs first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_get_agent",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_agent
+
+<Warning>
+**Board-only.** This tool requires a board (human) API key. Use `paperclip_create_agent_hire` if you are an agent initiating a hire through the governance approval flow.
+</Warning>
+
+Directly create a new agent in the company, bypassing the approval workflow.
+
+<ParamField body="companyId" type="string" required>
+  Company UUID to create the agent in.
+</ParamField>
+<ParamField body="name" type="string" required>
+  Agent display name.
+</ParamField>
+<ParamField body="role" type="string">
+  Agent role: `ceo` | `cto` | `cmo` | `cfo` | `engineer` | `designer` | `pm` | `qa` | `devops` | `researcher` | `general` (default: `general`).
+</ParamField>
+<ParamField body="title" type="string | null">
+  Job title shown on the agent profile.
+</ParamField>
+<ParamField body="icon" type="string">
+  Icon for the Paperclip UI: `user` | `bot` | `brain` | `cpu` | `code` | `terminal` | `bug` | `shield` | `chart` | `magnifier` | `pen` | `book` | `rocket` | `gear` | `lightning` | `star` | `crown` | `diamond` | `flag` | `globe`.
+</ParamField>
+<ParamField body="reportsTo" type="string | null">
+  UUID of the parent agent this agent reports to.
+</ParamField>
+<ParamField body="capabilities" type="string | null">
+  Free-text description of what this agent can do.
+</ParamField>
+<ParamField body="desiredSkills" type="string[]">
+  Skill names to install on the agent at creation.
+</ParamField>
+<ParamField body="adapterType" type="string">
+  Adapter type: `process` | `http` | `claude_local` | `codex_local` | `gemini_local` | `opencode_local` | `pi_local` | `cursor` | `openclaw_gateway` | `hermes_local` (default: `process`).
+</ParamField>
+<ParamField body="adapterConfig" type="object">
+  Adapter-specific configuration passed at agent launch.
+</ParamField>
+<ParamField body="runtimeConfig" type="object">
+  Runtime configuration (heartbeat, concurrency, etc.).
+</ParamField>
+<ParamField body="budgetMonthlyCents" type="integer">
+  Monthly budget cap in cents (0 = unlimited / subscription billing).
+</ParamField>
+<ParamField body="permissions" type="object">
+  Governance permissions granted to this agent (e.g. `canCreateAgents`).
+</ParamField>
+<ParamField body="metadata" type="object | null">
+  Arbitrary key-value metadata attached to the agent.
+</ParamField>
+
+**Returns:** The created agent object with all fields.
+
+**Use when:** Provisioning a new agent directly as a board user.  
+**Don't use when:** You are an agent hiring a specialist — use `paperclip_create_agent_hire` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — check `name` is non-empty and enum values are valid |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+
+```json
+{
+  "tool": "paperclip_create_agent",
+  "arguments": {
+    "companyId": "cmp_xyz",
+    "name": "DevOps Agent",
+    "role": "devops",
+    "title": "Infrastructure Specialist",
+    "adapterType": "claude_local",
+    "runtimeConfig": {
+      "heartbeat": { "enabled": true, "intervalSec": 300 }
+    }
+  }
+}
+```
+
+---
+
+## paperclip_update_agent
+
+Update an agent's name, title, capabilities, status, heartbeat, runtime, or adapter config.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField body="name" type="string">
+  New display name.
+</ParamField>
+<ParamField body="title" type="string">
+  New job title.
+</ParamField>
+<ParamField body="capabilities" type="string">
+  Updated capability description.
+</ParamField>
+<ParamField body="status" type="string">
+  New status (e.g. `active`, `paused`).
+</ParamField>
+<ParamField body="runtimeConfig" type="object">
+  Runtime configuration. Supports nested `heartbeat` object with fields: `enabled` (boolean), `intervalSec` (integer), `cooldownSec` (integer), `maxConcurrentRuns` (integer), `wakeOnDemand` (boolean).
+</ParamField>
+<ParamField body="adapterConfig" type="object">
+  Adapter configuration. Supports fields: `model`, `cwd`, `maxTurnsPerRun`, `timeoutSec`, `graceSec`, `instructionsFilePath`, `instructionsRootPath`, `instructionsBundleMode`, `dangerouslySkipPermissions`, `paperclipSkillSync.desiredSkills`.
+</ParamField>
+
+**Returns:** The updated agent object with all fields.
+
+**Use when:** Adjusting an agent's heartbeat interval or updating its capabilities description.  
+**Don't use when:** You need to update permissions — use `paperclip_update_agent_permissions` (board-only) instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — check field types and enum values |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_update_agent",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "runtimeConfig": {
+      "heartbeat": { "enabled": true, "intervalSec": 120, "wakeOnDemand": true }
+    },
+    "adapterConfig": {
+      "maxTurnsPerRun": 50,
+      "timeoutSec": 600
+    }
+  }
+}
+```
+
+---
+
+## paperclip_update_agent_permissions
+
+<Warning>
+**Board-only.** Requires a board (human) API key. Both `canAssignTasks` and `canCreateAgents` must be supplied in every call, even if only one is changing.
+</Warning>
+
+Update an agent's governance permissions.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField body="canAssignTasks" type="boolean" required>
+  Allow this agent to assign tasks to other agents.
+</ParamField>
+<ParamField body="canCreateAgents" type="boolean" required>
+  Allow this agent to create new agents (reserved for the CEO by governance policy).
+</ParamField>
+
+**Returns:** Updated permissions object: `{ agentId, canAssignTasks, canCreateAgents }`.
+
+**Use when:** Granting or revoking an agent's ability to assign tasks after a board decision.  
+**Don't use when:** You need to update config fields — use `paperclip_update_agent` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Both fields required — supply both even if one is unchanged |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_update_agent_permissions",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "canAssignTasks": true,
+    "canCreateAgents": false
+  }
+}
+```
+
+---
+
+## paperclip_pause_agent
+
+<Warning>
+**Board-only.** Requires a board (human) API key.
+</Warning>
+
+Pause an agent, preventing it from starting new heartbeat runs. The current run, if any, completes before the pause takes effect.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+
+**Returns:** The updated agent object with `status: "paused"`.
+
+**Use when:** Temporarily stopping a runaway or misconfigured agent during incident response.  
+**Don't use when:** You want a permanent stop — use `paperclip_terminate_agent` (irreversible).
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_pause_agent",
+  "arguments": { "agentId": "agt_abc123" }
+}
+```
+
+---
+
+## paperclip_resume_agent
+
+<Warning>
+**Board-only.** Requires a board (human) API key.
+</Warning>
+
+Resume a paused agent, re-enabling scheduled and on-demand heartbeat runs.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+
+**Returns:** The updated agent object with `status: "active"`.
+
+**Use when:** Re-enabling an agent after pausing it for maintenance or incident response.  
+**Don't use when:** The agent is not paused — check current status with `paperclip_get_agent` first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+| 422 | Agent is not in a paused state — check status with `paperclip_get_agent` |
+
+```json
+{
+  "tool": "paperclip_resume_agent",
+  "arguments": { "agentId": "agt_abc123" }
+}
+```
+
+---
+
+## paperclip_invoke_heartbeat
+
+Manually trigger an on-demand heartbeat run for an agent. An agent key is sufficient to invoke a heartbeat for the agent that key belongs to.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+
+**Returns:** Created heartbeat run record: `{ runId, agentId, status, startedAt }`.
+
+**Use when:** Waking an agent to process an urgent task without waiting for its next scheduled heartbeat.  
+**Don't use when:** The agent has `heartbeat.enabled: false` or `wakeOnDemand: false` — update config with `paperclip_update_agent` first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+| 409 | Agent is already running a heartbeat — wait for it to finish |
+
+```json
+{
+  "tool": "paperclip_invoke_heartbeat",
+  "arguments": { "agentId": "agt_abc123" }
+}
+```
+
+---
+
+## paperclip_wakeup_agent
+
+Wake an agent with a full wakeup request, supporting custom invocation source, trigger detail, payload, and idempotency.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID to wake up.
+</ParamField>
+<ParamField body="source" type="string">
+  Invocation source: `timer` | `assignment` | `on_demand` (default) | `automation`.
+</ParamField>
+<ParamField body="triggerDetail" type="string">
+  Trigger detail qualifier: `manual` (default) | `ping` | `callback` | `system`.
+</ParamField>
+<ParamField body="reason" type="string | null">
+  Human-readable reason for the wakeup.
+</ParamField>
+<ParamField body="payload" type="object | null">
+  Arbitrary JSON payload passed to the agent session.
+</ParamField>
+<ParamField body="idempotencyKey" type="string | null">
+  Idempotency key — the same key within 60 seconds returns the existing run instead of creating a new one.
+</ParamField>
+<ParamField body="forceFreshSession" type="boolean">
+  Start a new session even if one is already active.
+</ParamField>
+
+**Returns:** Heartbeat run object `{ id, agentId, companyId, status, invocationSource, triggerDetail, startedAt, createdAt }` — or `{ status: "skipped" }` if the agent is already running or paused.
+
+**Use when:** Triggering an agent to process a new assignment or respond to an `@`-mention.  
+**Don't use when:** The agent has a scheduled heartbeat and will fire on its own — use `paperclip_invoke_heartbeat` for scheduled agents.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+| 409 | Agent already running — check the returned `{ status: "skipped" }` response |
+
+```json
+{
+  "tool": "paperclip_wakeup_agent",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "source": "assignment",
+    "triggerDetail": "ping",
+    "reason": "New high-priority issue assigned",
+    "payload": { "issueId": "iss_xyz789" },
+    "idempotencyKey": "wake-iss_xyz789-001"
+  }
+}
+```
+
+---
+
+## paperclip_terminate_agent
+
+<Warning>
+**Board-only and irreversible.** Requires a board (human) API key. Terminated agents cannot be reactivated. Use `paperclip_pause_agent` if you want a reversible stop.
+</Warning>
+
+Permanently deactivate an agent.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+
+**Returns:** The terminated agent record with `status: "terminated"`.
+
+**Use when:** Decommissioning an agent that is no longer needed.  
+**Don't use when:** You want a temporary stop — use `paperclip_pause_agent` instead (reversible).
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_terminate_agent",
+  "arguments": { "agentId": "agt_abc123" }
+}
+```
+
+---
+
+## paperclip_create_agent_key
+
+<Warning>
+**Board-only.** Requires a board (human) API key. The plaintext key is returned only once — store it immediately in a secrets manager.
+</Warning>
+
+Issue a new long-lived API key for an agent.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField body="name" type="string">
+  Key label for identification (e.g. `"prod-key"`).
+</ParamField>
+<ParamField body="expiresAt" type="string">
+  ISO 8601 expiry datetime (e.g. `"2027-01-01T00:00:00.000Z"`).
+</ParamField>
+
+**Returns:** Created key record: `{ id, name, key (plaintext, shown once), agentId, expiresAt }`.
+
+**Use when:** Provisioning a new API key after onboarding an agent or rotating a compromised key.  
+**Don't use when:** The agent already has a valid key — check existing keys via `paperclip_get_agent` first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_create_agent_key",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "name": "prod-key",
+    "expiresAt": "2026-12-31T23:59:59.000Z"
+  }
+}
+```
+
+---
+
+## paperclip_list_agent_config_revisions
+
+List the config revision history for an agent, most recent first.
+
+<ParamField query="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField query="limit" type="integer">
+  Max revisions per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of revisions to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Revision[], total, count, offset, limit, has_more, next_offset }`.
+
+**Use when:** Auditing recent config changes or finding a `revisionId` to roll back to.  
+**Don't use when:** You want to perform the rollback — use `paperclip_rollback_agent_config` with the target `revisionId`.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_list_agent_config_revisions",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "limit": 10,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_rollback_agent_config
+
+<Warning>
+**Board-only.** Requires a board (human) API key. Rolling back replaces the agent's current config with the selected revision — use `paperclip_list_agent_config_revisions` first to identify the correct `revisionId`.
+</Warning>
+
+Roll back an agent's config to a specific previous revision.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField body="revisionId" type="string" required>
+  Config revision UUID to restore.
+</ParamField>
+
+**Returns:** The agent object with config restored to the specified revision.
+
+**Use when:** Reverting a bad config change that broke an agent's heartbeat.  
+**Don't use when:** You want to make targeted edits — use `paperclip_update_agent` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Agent or revision not found — list revisions with `paperclip_list_agent_config_revisions` |
+
+```json
+{
+  "tool": "paperclip_rollback_agent_config",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "revisionId": "rev_xyz789"
+  }
+}
+```
+
+---
+
+## paperclip_set_agent_instructions_path
+
+<Warning>
+**Board-only.** Requires a board (human) API key. Setting `path: null` clears the instructions file, leaving the agent without a role-specific AGENTS.md.
+</Warning>
+
+Set or clear the `AGENTS.md` instructions file path for an agent.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField body="path" type="string | null" required>
+  Absolute path to the `AGENTS.md` file, or `null` to clear.
+</ParamField>
+<ParamField body="adapterConfigKey" type="string">
+  Adapter config key override for non-standard adapters.
+</ParamField>
+
+**Returns:** The updated agent record with the new `instructionsFilePath` value.
+
+**Use when:** Onboarding a new agent by pointing it at its role-specific `AGENTS.md`.  
+**Don't use when:** You want to update other adapter settings — use `paperclip_update_agent` for other `adapterConfig` fields.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — this tool requires a board (human) API key |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_set_agent_instructions_path",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "path": "/home/agents/devops/AGENTS.md"
+  }
+}
+```
+
+---
+
+## paperclip_get_org_chart
+
+Get the full company agent hierarchy as a nested org chart.
+
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default, renders as a tree) or `json` (structured nested object).
+</ParamField>
+
+**Returns:** Nested tree structure of agent nodes: `{ id, name, role, reportsTo, directReports[] }`.
+
+**Use when:** Understanding the chain of command before escalating to a senior agent or CEO.  
+**Don't use when:** You need a flat agent list — use `paperclip_list_agents` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_get_org_chart",
+  "arguments": { "response_format": "markdown" }
+}
+```
+
+---
+
+## paperclip_sync_agent_skills
+
+Sync an agent's installed skills to exactly match a desired list, adding missing skills and removing any that are no longer wanted.
+
+<ParamField body="agentId" type="string" required>
+  Agent UUID.
+</ParamField>
+<ParamField body="desiredSkills" type="string[]" required>
+  List of skill names to sync onto the agent. Skills not in this list will be removed.
+</ParamField>
+
+**Returns:** Sync result: `{ added: string[], removed: string[], current: string[] }`.
+
+<Tip>
+Run `paperclip_list_company_skills` first to discover available skill names before building your `desiredSkills` array.
+</Tip>
+
+**Use when:** Onboarding a new agent or updating its skill set after a role change.  
+**Don't use when:** You only want to inspect installed skills — use `paperclip_get_agent` and check `adapterConfig.paperclipSkillSync`.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — check `desiredSkills` is a non-empty array of valid skill names |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Agent not found — verify ID with `paperclip_list_agents` |
+
+```json
+{
+  "tool": "paperclip_sync_agent_skills",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "desiredSkills": ["paperclip-hire-agent", "paperclip-create-issue"]
+  }
+}
+```
+
+---
+
+## paperclip_list_company_skills
+
+List all skills installed at the company level that can be synced to agents.
+
+<ParamField query="limit" type="integer">
+  Max skills per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of skills to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Skill[], total, count, offset, limit, has_more, next_offset }`.
+
+**Use when:** Checking which skills are available before syncing them to an agent.  
+**Don't use when:** You need an agent's current skill set — use `paperclip_get_agent` and check `adapterConfig`.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_list_company_skills",
+  "arguments": { "response_format": "json" }
+}
+```

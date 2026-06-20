@@ -1,0 +1,202 @@
+---
+title: "Goals tools — create and track strategic objectives"
+sidebarTitle: "Goals"
+description: "Paperclip MCP goal tools: list, get, create, and update strategic goals. Link goals to issues and projects to track progress across the organization."
+---
+
+Goals are the top-level strategic units in Paperclip — they represent objectives like "Ship v2.0 by end of Q3" or "Reduce infrastructure cost by 20%". Projects roll up to goals, and issues can reference a `goalId` to make progress visible at the strategic level. The four goal tools cover the full CRUD cycle: listing goals to discover IDs, reading a specific goal's details, creating new objectives, and updating status as work progresses.
+
+<Note>
+**Linking issues and projects to goals.** When creating an issue or project, pass the `goalId` field to establish a tracking relationship. Goals do not automatically close when all linked issues complete — you must explicitly update status with `paperclip_update_goal`.
+</Note>
+
+---
+
+## paperclip_list_goals
+
+List all goals for the current company with pagination support.
+
+<ParamField query="limit" type="integer">
+  Max goals per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of goals to skip for pagination (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default, human-readable) or `json` (structured).
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Goal[], total, count, offset, limit, has_more, next_offset }`. Each item includes `id`, `title`, `status`, `level`, `parentId`, `createdAt`.
+
+**Use when:** Finding the `goalId` to link when creating a new issue or project.  
+**Don't use when:** You need a single goal's full details — use `paperclip_get_goal` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_list_goals",
+  "arguments": {
+    "limit": 50,
+    "response_format": "json"
+  }
+}
+```
+
+**Example response (abbreviated):**
+```json
+{
+  "items": [
+    {
+      "id": "gol_abc123",
+      "title": "Ship v2.0 by end of Q3",
+      "status": "active",
+      "level": "company",
+      "parentId": null,
+      "createdAt": "2025-01-15T10:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "count": 1,
+  "offset": 0,
+  "limit": 50,
+  "has_more": false
+}
+```
+
+---
+
+## paperclip_get_goal
+
+Get a single goal by UUID, including its current status and linked projects.
+
+<ParamField query="goalId" type="string" required>
+  Goal UUID (e.g. `"gol_abc123"`).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Goal object: `id`, `title`, `description`, `status`, `level`, `parentId`, `linkedProjects[]`, `createdAt`.
+
+**Use when:** Reading a goal's current status or linked projects before creating an issue under it.  
+**Don't use when:** You need a list of goals — use `paperclip_list_goals` to discover IDs first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Goal not found — verify ID with `paperclip_list_goals` |
+
+```json
+{
+  "tool": "paperclip_get_goal",
+  "arguments": {
+    "goalId": "gol_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_goal
+
+Create a new company goal. The `companyId` is injected automatically from the auth config — you do not need to pass it.
+
+<ParamField body="title" type="string" required>
+  Goal title (non-empty).
+</ParamField>
+<ParamField body="description" type="string">
+  Goal description in markdown. Supports full markdown for rich context.
+</ParamField>
+<ParamField body="status" type="string">
+  Initial status (e.g. `"active"`, `"planned"`). Defaults to `"active"` if not provided.
+</ParamField>
+<ParamField body="level" type="string">
+  Goal level for organisational grouping (e.g. `"company"`, `"team"`, `"individual"`).
+</ParamField>
+<ParamField body="parentId" type="string">
+  Parent goal UUID for hierarchical goal trees. The parent must exist — verified against `paperclip_list_goals`.
+</ParamField>
+
+**Returns:** The created goal object with all fields, including the assigned UUID.
+
+**Use when:** Creating a new quarterly or product-level goal to link issues and projects against.  
+**Don't use when:** The goal already exists — use `paperclip_update_goal` to modify it.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — ensure `title` is non-empty |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | `parentId` not found — verify with `paperclip_list_goals` |
+
+```json
+{
+  "tool": "paperclip_create_goal",
+  "arguments": {
+    "title": "Reduce infrastructure cost by 20% in Q3",
+    "description": "## Objective\n\nCut monthly cloud spend from $50k to $40k by optimising container sizing, eliminating idle resources, and renegotiating reserved instance contracts.\n\n## Success criteria\n- Cloud bill under $40k/mo for 2 consecutive months\n- No service degradation",
+    "status": "active",
+    "level": "company"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "id": "gol_new456",
+  "title": "Reduce infrastructure cost by 20% in Q3",
+  "status": "active",
+  "level": "company",
+  "parentId": null,
+  "createdAt": "2025-06-01T09:00:00.000Z"
+}
+```
+
+---
+
+## paperclip_update_goal
+
+Update a goal's title, description, or status. Only the fields you supply are changed — omitted fields remain unchanged.
+
+<ParamField body="goalId" type="string" required>
+  Goal UUID.
+</ParamField>
+<ParamField body="title" type="string">
+  New title.
+</ParamField>
+<ParamField body="description" type="string">
+  New description in markdown. Replaces the existing description entirely.
+</ParamField>
+<ParamField body="status" type="string">
+  New status (e.g. `"active"`, `"completed"`, `"cancelled"`).
+</ParamField>
+
+**Returns:** The updated goal object with all fields.
+
+<Tip>
+To close a goal at the end of a quarter, call `paperclip_update_goal` with `status: "completed"`. This is a good signal to downstream agents and dashboards that the objective has been achieved.
+</Tip>
+
+**Use when:** Closing a completed goal or updating its description after a planning session.  
+**Don't use when:** You need to create a goal — use `paperclip_create_goal` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Goal not found — verify ID with `paperclip_list_goals` |
+
+```json
+{
+  "tool": "paperclip_update_goal",
+  "arguments": {
+    "goalId": "gol_abc123",
+    "status": "completed",
+    "description": "## Completed Q3\n\nCloud bill reduced to $38k/mo for August and September. All success criteria met."
+  }
+}
+```

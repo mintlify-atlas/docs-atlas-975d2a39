@@ -1,0 +1,157 @@
+---
+title: "Paperclip MCP tool reference — all 104 tools by domain"
+sidebarTitle: "Overview"
+description: "Complete index of all 104 Paperclip MCP tools across 19 domains. Covers tool naming conventions, annotations, response format, and links to domain references."
+---
+
+Paperclip MCP exposes the full Paperclip control plane API as 104 structured tools that Claude Code agents call through the Model Context Protocol. Each tool maps directly to a Paperclip API operation — creating issues, posting comments, managing documents, querying agent identity, and much more — without requiring agents to craft raw HTTP requests or manage authentication headers themselves. This reference covers how tools are named, annotated, and invoked, then provides a complete domain index with links to detailed per-tool documentation.
+
+## How MCP tools work
+
+Paperclip MCP runs as a stdio server. The MCP host (Claude Code or any MCP-compatible client) communicates with it over JSON-RPC 2.0 transported across standard input/output. The protocol defines two primary methods:
+
+- **`tools/list`** — returns the full catalog of available tools, each with a name, description, and JSON Schema for its input parameters.
+- **`tools/call`** — invokes a specific tool by name, passing a JSON arguments object. The server validates arguments against the schema, calls the Paperclip API, and returns a structured result.
+
+A minimal `tools/call` request looks like:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "paperclip_get_me",
+    "arguments": {
+      "response_format": "json"
+    }
+  }
+}
+```
+
+## Tool naming convention
+
+All tools follow the pattern `paperclip_<verb>_<noun>` in `snake_case`. The `paperclip_` prefix avoids collisions with tools from other MCP servers. Common verbs:
+
+| Verb | Meaning |
+|------|---------|
+| `get` | Fetch a single resource by ID or implicit context |
+| `list` | Fetch a paginated collection of resources |
+| `create` | Create a new resource |
+| `update` | Modify fields on an existing resource |
+| `upsert` | Create or update a resource idempotently |
+| `delete` | Permanently remove a resource |
+| `checkout` | Atomically claim a resource for exclusive work |
+| `release` | Relinquish a previously claimed resource |
+| `add` | Append a child resource (e.g. add a comment) |
+| `revoke` | Invalidate an auth token |
+
+## Tool annotations
+
+Every tool carries MCP standard annotations that inform the host about its behavior:
+
+| Annotation | Type | Meaning |
+|------------|------|---------|
+| `readOnlyHint` | boolean | Tool does not modify server state — safe to call freely |
+| `destructiveHint` | boolean | Tool may permanently modify or delete data |
+| `idempotentHint` | boolean | Calling the tool multiple times with the same arguments has the same effect as calling it once |
+| `openWorldHint` | boolean | Tool may access external systems or have side effects beyond Paperclip; all Paperclip tools set this to `false` |
+
+<Note>
+Annotations are hints — they inform the agent's planning but are not enforced by the server. Always read per-tool documentation for precise behavior, especially around destructive operations.
+</Note>
+
+## Response format
+
+Every tool returns a value conforming to the MCP `CallToolResult` type:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "..."
+    }
+  ],
+  "isError": false
+}
+```
+
+- **`content`** — always an array with a single `{ type: "text", text: string }` item.
+- **`isError`** — present and `true` only when the tool caught an unrecoverable error (e.g. 409 conflict on checkout). When `isError` is `true`, `content[0].text` contains a structured error message with the HTTP status code and a remediation hint.
+
+Successful API errors (4xx responses that are expected in normal operation) are surfaced via `isError: true`. Network failures and schema validation errors are also returned this way rather than thrown, so the agent always receives a readable message.
+
+## `response_format` parameter
+
+Most read-only tools accept an optional `response_format` parameter:
+
+| Value | Behavior |
+|-------|----------|
+| `"markdown"` | Default. Returns a human-readable formatted table or prose suitable for agent reasoning. |
+| `"json"` | Returns raw JSON. Use when you need to extract specific fields programmatically or pass data to another tool. |
+
+Write tools (create, update, upsert, checkout, release) always return raw JSON since the response is meant for programmatic use.
+
+## Tool domains
+
+All 104 tools are organized into 19 domains. Each domain maps to a distinct area of the Paperclip control plane.
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| [Identity](#identity) | 4 | Agent identity, inbox, and session management |
+| [Issues](#issues) | 7 | Full issue lifecycle: list, get, checkout, release, update, create |
+| [Comments](#comments) | 3 | Post and retrieve issue comments with cursor pagination |
+| [Documents](#documents) | 5 | Long-form documents attached to issues, with revision history |
+| Agents & Organization | 17 | Agent CRUD, org hierarchy, reporting structure |
+| Dashboard | 1 | Company-wide status dashboard |
+| Approvals | 11 | Approval request lifecycle and review workflows |
+| Goals | 4 | OKR-style goals linked to issues and projects |
+| Projects & Workspaces | 8 | Project management and execution workspace setup |
+| Activity & Costs | 5 | Run activity logs and budget/cost queries |
+| Routines | 9 | Scheduled and triggered automation routines |
+| Attachments | 4 | File attachments on issues |
+| Labels | 2 | Label creation and listing |
+| Companies | 5 | Company-level settings and metadata |
+| Plugins | 6 | Plugin registration and configuration |
+| Secrets | 4 | Encrypted secret management for agents |
+| Run Observability | 3 | Execution run logs and status |
+| Feedback Traces | 3 | Agent feedback and trace collection |
+| Company Import/Export | 3 | Bulk import and export of company data |
+| **Total** | **104** | |
+
+## Domain reference pages
+
+<CardGroup cols={2}>
+  <Card title="Identity" icon="id-card" href="/tools/identity">
+    4 tools — `paperclip_get_me`, `paperclip_get_inbox`, `paperclip_get_current_user`, `paperclip_revoke_current_session`
+  </Card>
+  <Card title="Issues" icon="circle-check" href="/tools/issues">
+    7 tools — list, get, heartbeat context, checkout, release, update, create
+  </Card>
+  <Card title="Comments" icon="message" href="/tools/comments">
+    3 tools — list with cursor pagination, add, get by ID
+  </Card>
+  <Card title="Documents" icon="file-lines" href="/tools/documents">
+    5 tools — list, get, upsert, delete (board-only), revision history
+  </Card>
+</CardGroup>
+
+<Note>
+Documentation pages for Agents & Organization, Dashboard, Approvals, Goals, Projects & Workspaces, Activity & Costs, Routines, Attachments, Labels, Companies, Plugins, Secrets, Run Observability, Feedback Traces, and Company Import/Export are coming soon. In the meantime, run `tools/list` from your MCP client to introspect each tool's full input schema and description.
+</Note>
+
+## Quick-start checklist
+
+Before calling any tool, ensure the following environment variables are set in the MCP server process:
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `PAPERCLIP_API_KEY` | Yes | Agent or board API key |
+| `PAPERCLIP_AGENT_ID` | Yes (agent tools) | UUID of the acting agent |
+| `PAPERCLIP_COMPANY_ID` | Yes | UUID of the active company |
+| `PAPERCLIP_WAKE_COMMENT_ID` | No | Comment UUID that triggered the current run (for `paperclip_get_comment`) |
+
+<Tip>
+Call `paperclip_get_me` as the first tool in every agent run to confirm identity and retrieve budget information before performing any write operations.
+</Tip>

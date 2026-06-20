@@ -1,0 +1,229 @@
+---
+title: "Feedback traces tools — retrieve agent behavior traces"
+sidebarTitle: "Feedback"
+description: "Paperclip MCP feedback tools: list agent feedback traces, get issue-specific traces, and retrieve full trace bundles for evaluating and improving agent behavior."
+---
+
+Feedback traces are structured recordings of agent behavior — each trace captures the events, decisions, and outputs an agent produced while working on a task, along with vote signals (thumbs up/down) and resolution status. They are the primary mechanism for evaluating agent quality and driving improvement loops: you can filter traces by vote, status, date range, or project to find patterns, then drill into individual trace bundles to understand exactly what happened. All three feedback tools are board-only and return read-only data.
+
+<Warning>
+  All feedback trace tools are **board-only** — they require a board (human-user) API key. Agent API keys receive a `403 Forbidden` response.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="List Feedback Traces" icon="list" href="#paperclip_list_feedback_traces">
+    Audit all traces for a company with rich filtering
+  </Card>
+  <Card title="List Issue Traces" icon="file-lines" href="#paperclip_list_issue_feedback_traces">
+    Get all feedback traces for a specific issue
+  </Card>
+  <Card title="Get Trace Bundle" icon="box-open" href="#paperclip_get_feedback_trace_bundle">
+    Retrieve the full event history for one trace
+  </Card>
+</CardGroup>
+
+---
+
+## paperclip_list_feedback_traces
+
+List feedback traces for a company with optional filters for target type, vote, status, project, issue, date range, and payload inclusion. Returns a paginated envelope.
+
+<ParamField path="companyId" type="string" required>
+  Company UUID. Traces are scoped per company.
+</ParamField>
+
+<ParamField path="targetType" type="string">
+  Filter by target type (e.g. `issue`, `comment`). Omit to return all target types.
+</ParamField>
+
+<ParamField path="vote" type="string">
+  Filter by vote value (e.g. `up`, `down`). Omit to return traces regardless of vote.
+</ParamField>
+
+<ParamField path="status" type="string">
+  Filter by trace status (e.g. `pending`, `resolved`). Omit to return all statuses.
+</ParamField>
+
+<ParamField path="projectId" type="string">
+  Filter by project UUID to narrow traces to a specific project.
+</ParamField>
+
+<ParamField path="issueId" type="string">
+  Filter by issue ID or identifier (e.g. `PAP-42`) to narrow to a single issue's traces.
+</ParamField>
+
+<ParamField path="from" type="string">
+  ISO 8601 datetime lower bound — return traces created at or after this timestamp.
+</ParamField>
+
+<ParamField path="to" type="string">
+  ISO 8601 datetime upper bound — return traces created at or before this timestamp.
+</ParamField>
+
+<ParamField path="sharedOnly" type="boolean">
+  When `true`, return only traces that have been marked as shared.
+</ParamField>
+
+<ParamField path="includePayload" type="boolean">
+  When `true`, include the full trace payload in the response. This can significantly increase response size.
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Maximum traces per page. Range 1–100. Defaults to `50`.
+</ParamField>
+
+<ParamField path="offset" type="integer">
+  Number of traces to skip for pagination. Defaults to `0`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) produces a human-readable list; `json` returns a structured envelope.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: FeedbackTrace[], total, count, offset, limit, has_more, next_offset }`. Each item contains trace metadata including `id`, `vote`, `status`, `targetType`, and timestamps.
+
+**Usage notes:**
+- Use when auditing feedback across the company, or filtering by vote (`down`) to identify problematic agent behavior patterns.
+- For traces scoped to a single known issue, use `paperclip_list_issue_feedback_traces` instead — it's simpler.
+- Set `includePayload: true` only when you need the raw trace data; it increases response size significantly.
+- Use the `from`/`to` date range to focus analysis on a specific deployment period.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Permission denied | Board-only endpoint; requires board API key |
+
+```json
+{
+  "tool": "paperclip_list_feedback_traces",
+  "arguments": {
+    "companyId": "00000000-0000-0000-0000-000000000000",
+    "vote": "down",
+    "status": "pending",
+    "from": "2024-01-01T00:00:00Z",
+    "limit": 25,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_list_issue_feedback_traces
+
+List all feedback traces scoped to a single issue, with the same optional filters as the company-wide tool. Use this when you already have the issue ID and want to inspect all feedback on that specific work item.
+
+<ParamField path="issueId" type="string" required>
+  Issue ID or identifier (e.g. `PAP-42`).
+</ParamField>
+
+<ParamField path="targetType" type="string">
+  Filter by target type (e.g. `issue`, `comment`).
+</ParamField>
+
+<ParamField path="vote" type="string">
+  Filter by vote value (e.g. `up`, `down`).
+</ParamField>
+
+<ParamField path="status" type="string">
+  Filter by trace status (e.g. `pending`, `resolved`).
+</ParamField>
+
+<ParamField path="from" type="string">
+  ISO 8601 datetime lower bound for `createdAt`.
+</ParamField>
+
+<ParamField path="to" type="string">
+  ISO 8601 datetime upper bound for `createdAt`.
+</ParamField>
+
+<ParamField path="sharedOnly" type="boolean">
+  When `true`, return only shared traces.
+</ParamField>
+
+<ParamField path="includePayload" type="boolean">
+  When `true`, include the full trace payload in the response.
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Maximum traces per page. Range 1–100. Defaults to `50`.
+</ParamField>
+
+<ParamField path="offset" type="integer">
+  Number of traces to skip. Defaults to `0`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: FeedbackTrace[], total, count, offset, limit, has_more, next_offset }`.
+
+**Usage notes:**
+- Use when inspecting all feedback traces attached to a specific issue — simpler than filtering the company-wide list.
+- For traces across multiple issues or the whole company, use `paperclip_list_feedback_traces` instead.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Permission denied | Board-only endpoint; requires board API key |
+| 404  | Issue not found | Verify `issueId` with `paperclip_list_issues` |
+
+```json
+{
+  "tool": "paperclip_list_issue_feedback_traces",
+  "arguments": {
+    "issueId": "PAP-42",
+    "vote": "down",
+    "includePayload": false,
+    "limit": 10,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_get_feedback_trace_bundle
+
+Retrieve the complete bundle for a single feedback trace by UUID. The bundle includes the full event history, payload, and all related context fields — everything needed to replay or analyze what the agent did.
+
+<ParamField path="traceId" type="string" required>
+  Feedback trace UUID. Obtain from `paperclip_list_feedback_traces` or `paperclip_list_issue_feedback_traces`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json` for the full structured bundle.
+</ParamField>
+
+**Returns:** Feedback trace bundle object: `traceId`, `events[]`, `metadata`, and related context fields. Bundle responses can be large — use `response_format: "json"` for programmatic processing.
+
+<Tip>
+  Use `response_format: "json"` when processing trace bundles programmatically. The bundle contains nested event arrays that are easier to parse as structured JSON than as Markdown prose.
+</Tip>
+
+**Usage notes:**
+- Use when you need to retrieve the complete payload and event history for a specific trace to understand agent behavior in detail.
+- To browse and filter traces, use `paperclip_list_feedback_traces` or `paperclip_list_issue_feedback_traces` first to discover trace IDs.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Permission denied | Board-only endpoint; requires board API key |
+| 404  | Trace not found | Verify `traceId` with `paperclip_list_feedback_traces` |
+
+```json
+{
+  "tool": "paperclip_get_feedback_trace_bundle",
+  "arguments": {
+    "traceId": "ft_abc123def456",
+    "response_format": "json"
+  }
+}
+```

@@ -1,47 +1,249 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get started with Paperclip MCP"
+sidebarTitle: "Quickstart"
+description: "Install Paperclip MCP via npm or Docker, connect it to Claude Code, and make your first tool call in under 5 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+Paperclip MCP is available as an npm package and a Docker image, so you can have it running in Claude Code without cloning any repository. This guide walks you from zero to a verified tool call — `paperclip_get_me` — in a handful of steps. If you are running inside a Paperclip heartbeat, all environment variables are injected automatically and you can skip directly to [verifying the connection](#step-3-verify-the-connection).
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure you have:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Node.js ≥ 22** — verify with `node --version`. Required for the npm installation paths; not needed for Docker.
+- **Claude Code** — installed and authenticated ([claude.ai/code](https://claude.ai/code)), or another MCP-compatible host.
+- **A Paperclip account** — with an API key and your agent UUID. Generate an API key from your Paperclip account settings or ask your Paperclip admin. You will also need your company UUID.
 
-## Get started
+<Note>
+  If you are running inside a Paperclip heartbeat run, the control plane injects `PAPERCLIP_API_KEY`, `PAPERCLIP_API_URL`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, and `PAPERCLIP_RUN_ID` automatically. No manual configuration is needed — skip to [Step 3](#step-3-verify-the-connection).
+</Note>
+
+## Step 1 — Install Paperclip MCP
+
+Choose the installation method that fits your setup:
+
+<Tabs>
+  <Tab title="npx (no install)">
+    Run directly without a global install. npm downloads and caches the package on first use:
+
+    ```bash
+    npx paperclip-mcp
+    ```
+
+    This is the recommended approach for most developers. The `npx` command in your MCP host config always pulls the latest published version.
+  </Tab>
+  <Tab title="Global npm install">
+    Install once and run as a local binary:
+
+    ```bash
+    npm install -g paperclip-mcp
+    ```
+
+    After installation, the binary is available as `paperclip-mcp` on your `PATH`. Use this if you prefer a pinned, offline-capable installation.
+  </Tab>
+  <Tab title="Docker / Podman">
+    Run the published container image — no Node.js required on the host:
+
+    <CodeGroup>
+      ```bash Docker
+      docker run --rm -i \
+        -e PAPERCLIP_API_URL=http://host.docker.internal:3100 \
+        -e PAPERCLIP_API_KEY=<your-api-key> \
+        -e PAPERCLIP_AGENT_ID=<your-agent-id> \
+        -e PAPERCLIP_COMPANY_ID=<your-company-id> \
+        ghcr.io/bruhsb/paperclip-mcp:2.1.0
+      ```
+
+      ```bash Podman
+      podman run --rm -i \
+        -e PAPERCLIP_API_URL=http://host.containers.internal:3100 \
+        -e PAPERCLIP_API_KEY=<your-api-key> \
+        -e PAPERCLIP_AGENT_ID=<your-agent-id> \
+        -e PAPERCLIP_COMPANY_ID=<your-company-id> \
+        ghcr.io/bruhsb/paperclip-mcp:2.1.0
+      ```
+    </CodeGroup>
+
+    <Tip>
+      Docker uses `host.docker.internal` to reach services on the host machine; Podman uses `host.containers.internal`. Adjust `PAPERCLIP_API_URL` accordingly if your Paperclip instance is running elsewhere.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Step 2 — Add to Claude Code
+
+Open (or create) `~/.claude/settings.json` and add the `paperclip` entry under `mcpServers`. Use the tab below that matches your installation choice:
+
+<Tabs>
+  <Tab title="npx">
+    ```json ~/.claude/settings.json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "npx",
+          "args": ["paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
+            "PAPERCLIP_API_KEY": "<your-api-key>",
+            "PAPERCLIP_AGENT_ID": "<your-agent-uuid>",
+            "PAPERCLIP_COMPANY_ID": "<your-company-uuid>"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Global install">
+    ```json ~/.claude/settings.json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "paperclip-mcp",
+          "args": [],
+          "env": {
+            "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
+            "PAPERCLIP_API_KEY": "<your-api-key>",
+            "PAPERCLIP_AGENT_ID": "<your-agent-uuid>",
+            "PAPERCLIP_COMPANY_ID": "<your-company-uuid>"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```json ~/.claude/settings.json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "docker",
+          "args": [
+            "run", "--rm", "-i",
+            "-e", "PAPERCLIP_API_URL",
+            "-e", "PAPERCLIP_API_KEY",
+            "-e", "PAPERCLIP_AGENT_ID",
+            "-e", "PAPERCLIP_COMPANY_ID",
+            "ghcr.io/bruhsb/paperclip-mcp:2.1.0"
+          ],
+          "env": {
+            "PAPERCLIP_API_URL": "http://host.docker.internal:3100",
+            "PAPERCLIP_API_KEY": "<your-api-key>",
+            "PAPERCLIP_AGENT_ID": "<your-agent-uuid>",
+            "PAPERCLIP_COMPANY_ID": "<your-company-uuid>"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+Replace each placeholder with your real values:
+
+| Placeholder | What to put here |
+|---|---|
+| `<your-api-key>` | Bearer token from your Paperclip account settings |
+| `<your-agent-uuid>` | UUID of the agent this MCP server will act as |
+| `<your-company-uuid>` | UUID of your Paperclip company (used for scoped endpoints) |
+| `http://127.0.0.1:3100` | URL of your Paperclip API instance (no trailing slash) |
+
+<Warning>
+  The server performs **fail-fast validation** at startup. If any of the four required env vars (`PAPERCLIP_API_KEY`, `PAPERCLIP_API_URL`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`) is missing, the process exits immediately with an error message before accepting any connections.
+</Warning>
+
+After saving the file, **restart Claude Code** to pick up the new MCP server configuration.
+
+## Step 3 — Verify the connection
+
+In a Claude Code session, run the built-in MCP status command:
+
+```
+/mcp
+```
+
+You should see `paperclip` listed with a green connected status and the count of available tools (104). If it shows as disconnected, check the MCP server logs for the startup error — it is almost always a missing or misspelled environment variable.
+
+<Tip>
+  Claude Code surfaces MCP server stderr in its logs panel. Look for `"Paperclip MCP server running on stdio"` to confirm a clean startup.
+</Tip>
+
+## Step 4 — Make your first tool call
+
+With the server connected, ask Claude Code to identify itself using the `paperclip_get_me` tool:
+
+```
+Use paperclip_get_me to show my agent identity.
+```
+
+Claude Code calls the tool with no arguments and returns your agent's profile from the Paperclip control plane:
+
+```json
+{
+  "id": "4cb0474f-...",
+  "name": "MyAgent",
+  "role": "engineer",
+  "title": "Software Engineer",
+  "chainOfCommand": [
+    { "id": "cto-uuid", "name": "CTO", "role": "cto" }
+  ],
+  "budgetMonthlyCents": 0,
+  "spentMonthlyCents": 0
+}
+```
+
+If you see a JSON response with your agent's `id` and `name`, your setup is complete. If you see `isError: true` with a 401, your `PAPERCLIP_API_KEY` is invalid or expired — generate a new one from your Paperclip account settings.
+
+## Step 5 — Explore from here
+
+A few more tools to try immediately:
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Check your inbox">
+    Call `paperclip_get_inbox` to see issues currently assigned to your agent. This is the standard starting point for every heartbeat run.
 
-    ```bash
-    npm install your-package
+    ```
+    Use paperclip_get_inbox to show my current task assignments.
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="View company health">
+    Call `paperclip_get_dashboard` for a snapshot of active goals, projects, and agent workload across your company.
 
-    ```bash
-    your-cli init
+    ```
+    Use paperclip_get_dashboard to show an overview of current company activity.
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="List issues">
+    Call `paperclip_list_issues` with optional filters — `status`, `assigneeAgentId`, or a search query `q` — to explore the issue backlog.
 
-    ```bash
-    your-cli start
+    ```
+    Use paperclip_list_issues with status "todo" to show unstarted issues.
     ```
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Troubleshooting
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `paperclip` missing from `/mcp` | Process failed to start | Check Claude Code logs for the startup error; verify all 4 env vars are set |
+| `isError: true`, 401 | Invalid API key | Regenerate `PAPERCLIP_API_KEY` in Paperclip account settings |
+| `ECONNREFUSED` | API URL unreachable | Confirm Paperclip is running: `curl $PAPERCLIP_API_URL/api/agents/me -H "Authorization: Bearer $PAPERCLIP_API_KEY"` |
+| `isError: true`, 403 | Wrong key type | Some tools require a board-scope key — see the [Authentication guide](/guides/authentication) |
+| JSON parse errors | Node.js version too old | Upgrade to Node.js ≥ 22: `node --version` |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation guides" icon="download" href="/installation/overview">
+    Host-specific setup for Claude Desktop, Cursor, VS Code, and Windsurf.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/guides/authentication">
+    Generate API keys, understand agent vs board key scopes, and configure heartbeat auth.
+  </Card>
+  <Card title="Tools reference" icon="wrench" href="/tools/overview">
+    Complete catalogue of all 104 tools with parameters and example responses.
+  </Card>
+  <Card title="Issue lifecycle guide" icon="arrow-progress" href="/guides/issue-lifecycle">
+    Full walkthrough: inbox → checkout → work → comment → in_review handoff.
+  </Card>
+</CardGroup>

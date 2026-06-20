@@ -1,0 +1,106 @@
+---
+title: "Set up Paperclip MCP in Cursor"
+sidebarTitle: "Cursor"
+description: "Add Paperclip MCP to Cursor's MCP config file. Includes npm and Docker configuration blocks and verification steps to confirm all 104 tools load."
+---
+
+Cursor reads MCP server definitions from a JSON file that you can place either at the project level (version-controlled, shared with your team) or in your global Cursor settings (shared across all projects on your machine). Either way, the config shape is the same: an `mcpServers` object containing a `paperclip` entry with `command`, `args`, and `env` keys. Once saved and reloaded, Cursor exposes all 104 Paperclip tools to its AI chat panel.
+
+## Config file location
+
+| Scope | Path |
+|---|---|
+| **Project** | `.cursor/mcp.json` in your project root |
+| **Global** | Cursor User Settings → MCP (GUI), or `~/.cursor/mcp.json` |
+
+<Tip>
+  Use the project-scoped file to keep the config version-controlled alongside your code. Use the global location to share it across all projects without repeating the entry.
+</Tip>
+
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `PAPERCLIP_API_KEY` | **Yes** | Bearer token for API authentication |
+| `PAPERCLIP_API_URL` | **Yes** | Base URL of the Paperclip API, e.g. `http://127.0.0.1:3100` |
+| `PAPERCLIP_AGENT_ID` | **Yes** | UUID of the agent running this MCP server |
+| `PAPERCLIP_COMPANY_ID` | **Yes** | UUID of the company (used for company-scoped endpoints) |
+| `PAPERCLIP_RUN_ID` | No | Heartbeat run ID — injected automatically by Paperclip during agent runs |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | No | HTTP request timeout in milliseconds (default: `30000`) |
+
+## Configuration
+
+Open (or create) the target config file and paste the block for your preferred variant.
+
+<Tabs>
+  <Tab title="npm (recommended)">
+    Requires Node.js ≥ 20 on the host. No container runtime needed.
+
+    ```json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "npx",
+          "args": ["-y", "paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_KEY": "YOUR_API_KEY",
+            "PAPERCLIP_API_URL": "YOUR_API_URL",
+            "PAPERCLIP_AGENT_ID": "YOUR_AGENT_ID",
+            "PAPERCLIP_COMPANY_ID": "YOUR_COMPANY_ID"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Docker / Podman">
+    Isolated runtime — no Node.js required on the host. Replace `podman` with `docker` in `command` if you are using Docker.
+
+    ```json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "podman",
+          "args": [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "PAPERCLIP_API_KEY=YOUR_API_KEY",
+            "-e",
+            "PAPERCLIP_API_URL=YOUR_API_URL",
+            "-e",
+            "PAPERCLIP_AGENT_ID=YOUR_AGENT_ID",
+            "-e",
+            "PAPERCLIP_COMPANY_ID=YOUR_COMPANY_ID",
+            "ghcr.io/bruhsb/paperclip-mcp:2.1.0"
+          ]
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Reload and verify
+
+<Steps>
+  <Step title="Reload MCP servers in Cursor">
+    Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **Cursor: Reload MCP Servers**. Alternatively, restart Cursor entirely.
+  </Step>
+  <Step title="Open a Cursor chat and confirm tool count">
+    Ask: **"What paperclip tools do you have?"**
+
+    You should see **104 tools** listed. If the count is lower or the server does not appear, check the troubleshooting guide.
+  </Step>
+</Steps>
+
+<Note>
+  For Paperclip-orchestrated heartbeat runs, `PAPERCLIP_RUN_ID` is injected automatically into the process environment — you do not need to add it to the config file.
+</Note>
+
+## See also
+
+- **Troubleshooting** — server not connecting, auth errors, network issues
+- **Auth keys** — how to obtain and rotate your `PAPERCLIP_API_KEY`
+- [Docker / Podman guide](/installation/docker) — building and running the container image locally

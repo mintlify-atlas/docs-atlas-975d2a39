@@ -1,0 +1,226 @@
+---
+title: "Run Paperclip MCP in Docker or Podman"
+sidebarTitle: "Docker"
+description: "Pull the pre-built ghcr.io/bruhsb/paperclip-mcp image or build locally. Covers networking, security hardening, compose stack setup, and smoke testing."
+---
+
+The Paperclip MCP container image is a production-ready, non-root Alpine image designed exclusively for MCP stdio transport: no network ports are exposed, and the process communicates entirely over stdin/stdout. You can pull the pre-built image from GitHub Container Registry, build it locally with a single command, or bring up the full Paperclip control plane alongside the MCP server using the included Compose file — all without Node.js on the host.
+
+## Pre-built image
+
+The latest stable image is published at:
+
+```
+ghcr.io/bruhsb/paperclip-mcp:2.1.0
+```
+
+Pull it explicitly before wiring it into your MCP host config:
+
+```bash
+# Podman
+podman pull ghcr.io/bruhsb/paperclip-mcp:2.1.0
+
+# Docker
+docker pull ghcr.io/bruhsb/paperclip-mcp:2.1.0
+```
+
+## Building locally
+
+<Steps>
+  <Step title="Clone the repository (if you haven't already)">
+    ```bash
+    git clone https://github.com/bruhsb/paperclip-mcp.git
+    cd paperclip-mcp
+    ```
+  </Step>
+  <Step title="Build the image">
+    <CodeGroup>
+      ```bash Podman (recommended)
+      podman build -t paperclip-mcp:2.1.0 -t paperclip-mcp:latest .
+      ```
+      ```bash Docker
+      docker build -t paperclip-mcp:2.1.0 -t paperclip-mcp:latest .
+      ```
+      ```bash npm script
+      npm run docker:build
+      ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Two-stage build
+
+The `Dockerfile` uses a two-stage build to keep the final image lean:
+
+| Stage | Base image | Purpose |
+|---|---|---|
+| **builder** | `node:22-slim` (glibc) | Installs all deps (including devDeps) and compiles TypeScript via `tsc` |
+| **runtime** | `node:22-alpine` (musl) | Production-only deps, compiled `dist/`, `tini` init, non-root `mcp` user |
+
+Both `@modelcontextprotocol/sdk` and `zod` are pure JavaScript — no native compilation is needed, making the musl libc in Alpine fully compatible. Typical final image size: **~186 MB**.
+
+## Running via `.mcp.json`
+
+Add the `paperclip` entry to your MCP host config file. The `-e KEY` form (without `=value`) passes the value from the outer `env` map into the container without embedding secrets in the `args` array.
+
+```json
+{
+  "mcpServers": {
+    "paperclip": {
+      "command": "podman",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network=host",
+        "-e",
+        "PAPERCLIP_API_KEY",
+        "-e",
+        "PAPERCLIP_API_URL",
+        "-e",
+        "PAPERCLIP_AGENT_ID",
+        "-e",
+        "PAPERCLIP_COMPANY_ID",
+        "paperclip-mcp:2.1.0"
+      ],
+      "env": {
+        "PAPERCLIP_API_KEY": "your-api-key-here",
+        "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
+        "PAPERCLIP_AGENT_ID": "your-agent-uuid-here",
+        "PAPERCLIP_COMPANY_ID": "your-company-uuid-here"
+      }
+    }
+  }
+}
+```
+
+<Note>
+  Keep secrets in `env`, not `args`. The `-e KEY` pattern (no `=value` in the args array) forwards the value from `env` into the container at runtime without embedding it in the command string.
+</Note>
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PAPERCLIP_API_KEY` | — (required) | Bearer token for the Paperclip API |
+| `PAPERCLIP_API_URL` | — (required) | Base URL, e.g. `http://127.0.0.1:3100` |
+| `PAPERCLIP_AGENT_ID` | — (required) | UUID of the agent running this MCP session |
+| `PAPERCLIP_COMPANY_ID` | — (required) | UUID of the Paperclip company/tenant |
+| `PAPERCLIP_RUN_ID` | _(auto)_ | Optional execution run ID for mutation tracing |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | `30000` | HTTP request timeout in milliseconds |
+
+## Networking
+
+### Local Paperclip server
+
+When the Paperclip API runs on the same host (e.g. `http://127.0.0.1:3100`), use `--network=host` so the container can reach the host's loopback interface:
+
+```bash
+podman run -i --rm --network=host \
+  -e PAPERCLIP_API_KEY=... \
+  -e PAPERCLIP_API_URL=http://127.0.0.1:3100 \
+  -e PAPERCLIP_AGENT_ID=... \
+  -e PAPERCLIP_COMPANY_ID=... \
+  paperclip-mcp:2.1.0
+```
+
+### Remote Paperclip server
+
+When connecting to a remote API, omit `--network=host` and set `PAPERCLIP_API_URL` to the full public URL:
+
+```bash
+podman run -i --rm \
+  -e PAPERCLIP_API_KEY=... \
+  -e PAPERCLIP_API_URL=https://api.yourpaperclip.example.com \
+  -e PAPERCLIP_AGENT_ID=... \
+  -e PAPERCLIP_COMPANY_ID=... \
+  paperclip-mcp:2.1.0
+```
+
+## Security hardening
+
+The image is built with defence-in-depth from the start:
+
+- **Non-root execution** — A dedicated `mcp` user (uid 1001, gid 1001) is created in the runtime stage. The Node.js process always runs as this user; root is never required at runtime.
+- **No network ports** — The image has no `EXPOSE` directive. The MCP server communicates exclusively via stdio, so there is no inbound network attack surface.
+- **Minimal runtime image** — Only `dist/`, production `node_modules`, and `tini` are present in the final stage. DevDependencies, test files, TypeScript source, and `.husky/` hooks are excluded.
+- **Alpine base, 0 OS CVEs** — `node:22-alpine` carries zero OS-layer CVEs at release time (verified with Trivy). The only Trivy findings are in npm's own bundled modules (`/usr/local/lib/node_modules/npm/`), which are not part of the application and are unreachable from a stdio-only server.
+- **No capabilities required** — Run with `--cap-drop=all` for maximum hardening if your container runtime supports it.
+
+```bash
+# Verify CVE posture yourself
+trivy image --severity HIGH,CRITICAL paperclip-mcp:2.1.0
+```
+
+## Signal handling
+
+`tini` runs as PID 1 via the image entrypoint:
+
+```
+ENTRYPOINT ["/sbin/tini", "--", "node", "dist/index.js"]
+```
+
+`tini` forwards `SIGTERM` to the Node.js process, which the MCP SDK translates into a clean shutdown — draining in-flight requests and closing the stdio transport gracefully. This ensures that `podman stop` or `docker stop` results in a clean exit rather than a hard `SIGKILL` after the stop timeout. `tini` is installed from Alpine's official package registry (`apk add --no-cache tini`).
+
+## Smoke testing the image
+
+After building locally, verify the image boots and enumerates tools correctly:
+
+<CodeGroup>
+  ```bash npm script
+  npm run docker:smoke
+  ```
+  ```bash Podman (direct)
+  node scripts/smoke-docker.mjs paperclip-mcp:2.1.0
+  ```
+  ```bash Docker (direct)
+  CONTAINER_RUNTIME=docker node scripts/smoke-docker.mjs paperclip-mcp:2.1.0
+  ```
+</CodeGroup>
+
+The smoke test sends an MCP `initialize` handshake followed by `tools/list` and asserts that the response contains exactly **104 tools**.
+
+## Compose stack
+
+To run the full Paperclip control plane server alongside the MCP process, use the included Compose file. This is the fastest way to get a complete local Paperclip environment running.
+
+<Steps>
+  <Step title="Copy the example env file and fill in required values">
+    ```bash
+    cp .env.example .env
+    # Edit .env and set BETTER_AUTH_SECRET (required) and any other overrides
+    ```
+  </Step>
+  <Step title="Start the stack">
+    <CodeGroup>
+      ```bash Podman Compose
+      podman-compose up -d
+      ```
+      ```bash Docker Compose
+      docker compose -f docker-compose.yaml up -d
+      ```
+    </CodeGroup>
+
+    This starts the `paperclip` service (the control plane API) on `127.0.0.1:3100` by default.
+  </Step>
+  <Step title="Verify the stack is healthy">
+    ```bash
+    # Check health status
+    podman ps --format "table {{.Names}}\t{{.Status}}"
+
+    # Tail logs
+    podman-compose logs -f paperclip
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The Compose file also includes an optional `postgres` service under the `external-db` profile. To use an external PostgreSQL database instead of the default embedded storage, run: `podman-compose --profile external-db up -d` and set `DATABASE_URL` in your `.env` file.
+</Note>
+
+## See also
+
+- [Claude Code guide](/installation/claude-code) — wiring the container into Claude Code
+- [Cursor guide](/installation/cursor) — wiring the container into Cursor
+- [VS Code guide](/installation/vscode) — wiring the container into VS Code
+- **Troubleshooting** — container not starting, network errors, auth failures

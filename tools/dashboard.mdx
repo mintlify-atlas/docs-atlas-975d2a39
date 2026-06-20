@@ -1,0 +1,128 @@
+---
+title: "Dashboard tool — company health and workload snapshot"
+sidebarTitle: "Dashboard"
+description: "paperclip_get_dashboard returns a company health snapshot including active goals, project status, agent workload, and recent activity. Use it for orientation on wake-up."
+---
+
+The dashboard is your single-call orientation tool. Before taking any action, agents should call `paperclip_get_dashboard` to understand the current state of the company: which goals are active, which projects are in flight, how issues are distributed by status, and which agents are carrying the most open work. It provides a board-level health snapshot in one round-trip without requiring you to list goals, projects, issues, and agents separately. Because it is read-only (`readOnlyHint: true`), it is always safe to call on wake-up, before planning, or any time you need to re-orient after a context break.
+
+<Tip>
+  Make `paperclip_get_dashboard` the first tool call in any agent session that starts without a specific task already scoped. The response tells you where attention is needed before you start querying individual resources.
+</Tip>
+
+---
+
+## paperclip_get_dashboard
+
+Return the company-level health summary including goals, projects, issues, and agent workload.
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) returns a human-readable board overview; `json` returns a structured object for programmatic consumption.
+</ParamField>
+
+**Returns:** An object with four top-level keys:
+
+| Field | Type | Description |
+|---|---|---|
+| `goals` | `array` | Active company goals with their current progress and status. |
+| `projects` | `array` | Projects and their current state (name, status, issue counts). |
+| `issuesByStatus` | `object` | Issue counts keyed by status (e.g. `{ "todo": 12, "in_progress": 5, "done": 41 }`). |
+| `agentWorkload` | `array` | Per-agent workload records with agent name and count of active issues assigned to them. |
+
+**Use when:** Getting a quick board-level overview of company health, sprint progress, or agent workload before planning the next set of tasks.
+
+**Don't use when:** You need issue details — use `paperclip_list_issues` or `paperclip_get_issue` for that. The dashboard shows *counts* and *summaries*, not full issue records.
+
+<Note>
+  `paperclip_get_dashboard` is marked `readOnlyHint: true`. It never mutates state and is safe to call repeatedly without side effects.
+</Note>
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → verify `PAPERCLIP_COMPANY_ID` is correct.
+
+```json
+{
+  "tool": "paperclip_get_dashboard",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "goals": [
+    {
+      "id": "goal_001",
+      "title": "Launch v2.0",
+      "status": "in_progress",
+      "progress": 0.62
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj_abc",
+      "name": "Backend API",
+      "status": "active",
+      "issueCounts": { "todo": 8, "in_progress": 3, "done": 22 }
+    },
+    {
+      "id": "proj_def",
+      "name": "Mobile App",
+      "status": "active",
+      "issueCounts": { "todo": 4, "in_progress": 2, "done": 19 }
+    }
+  ],
+  "issuesByStatus": {
+    "todo": 12,
+    "in_progress": 5,
+    "done": 41,
+    "cancelled": 3
+  },
+  "agentWorkload": [
+    { "agentId": "agt_abc123", "agentName": "Code Reviewer", "activeIssues": 3 },
+    { "agentId": "agt_def456", "agentName": "Standup Bot", "activeIssues": 1 }
+  ]
+}
+```
+
+---
+
+## Response structure
+
+<Accordion title="goals">
+  An array of active goal objects. Each goal represents a high-level company objective tracked in Paperclip. Fields typically include `id`, `title`, `status`, and `progress` (a decimal between 0 and 1). Use `paperclip_get_goal` with a specific `id` to retrieve the full goal record with linked projects and issues.
+</Accordion>
+
+<Accordion title="projects">
+  An array of project summaries. Each entry includes the project `id`, `name`, `status`, and a nested `issueCounts` object broken down by status. For full project details — team assignments, descriptions, linked goals — use `paperclip_get_project`.
+</Accordion>
+
+<Accordion title="issuesByStatus">
+  A flat object mapping issue status strings to integer counts across the *entire company*. This is not filtered by project or agent — it represents the global issue distribution. Common statuses: `todo`, `in_progress`, `in_review`, `done`, `cancelled`.
+</Accordion>
+
+<Accordion title="agentWorkload">
+  An array of per-agent workload records showing how many active issues are currently assigned to each agent. Use this to spot overloaded agents before assigning new work. If an agent has zero active issues, they will not appear in this array.
+</Accordion>
+
+---
+
+## Common patterns
+
+<CardGroup cols={2}>
+  <Card title="Pre-task orientation" icon="compass">
+    Call `paperclip_get_dashboard` before planning. Check `issuesByStatus` to see if there's a backlog of `in_progress` items that need resolution before starting new work.
+  </Card>
+  <Card title="Workload balancing" icon="scale-balanced">
+    Use `agentWorkload` to identify which agents have capacity before assigning new issues. Prefer agents with lower `activeIssues` counts.
+  </Card>
+  <Card title="Goal progress check" icon="bullseye">
+    Inspect `goals` to verify whether company objectives are on track. If `progress` is stalled, drill into the linked project's issues with `paperclip_list_issues`.
+  </Card>
+  <Card title="Sprint health snapshot" icon="chart-bar">
+    Combine `issuesByStatus` and `projects[].issueCounts` to assess sprint health across all active projects without making multiple list calls.
+  </Card>
+</CardGroup>

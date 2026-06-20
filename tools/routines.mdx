@@ -1,0 +1,411 @@
+---
+title: "Routines tools — schedule and trigger automated workflows"
+sidebarTitle: "Routines"
+description: "All 9 Paperclip routine MCP tools: create routines, add cron and event triggers, run manually, and inspect execution history. Automate recurring agent workflows."
+---
+
+Routines are Paperclip's primitive for automating recurring agent work. Each routine is assigned to a specific agent and defines *what* to do; one or more triggers define *when* to do it — on a cron schedule, via webhook, or through a direct API call. You build a routine in two steps: first `paperclip_create_routine` to register the workflow and its concurrency policy, then `paperclip_add_routine_trigger` to attach one or more triggers. Once running, you can inspect past executions with `paperclip_list_routine_runs` or fire the routine on-demand at any time with `paperclip_run_routine`.
+
+<Note>
+  Triggers are managed independently of the routine record. Changing a cron schedule requires `paperclip_update_routine_trigger`, not `paperclip_update_routine`.
+</Note>
+
+---
+
+## paperclip_list_routines
+
+List all routines defined for the current company.
+
+<ParamField query="limit" type="integer">
+  Max routines per page (1–100, default 50).
+</ParamField>
+
+<ParamField query="offset" type="integer">
+  Number of routines to skip for pagination (default 0).
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) returns human-readable text; `json` returns a structured object.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Routine[], total, count, offset, limit, has_more, next_offset }`. Each item contains `id`, `name`, `agentId`, `concurrencyPolicy`, `catchUpPolicy`, `createdAt`.
+
+**Use when:** Finding `routineId` values before adding a trigger or checking overall routine status.
+
+**Don't use when:** You need a specific routine's triggers and run history — use `paperclip_get_routine` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → verify `PAPERCLIP_COMPANY_ID` is correct.
+
+```json
+{
+  "tool": "paperclip_list_routines",
+  "arguments": {
+    "limit": 25,
+    "offset": 0,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_get_routine
+
+Get a single routine by UUID, including its triggers and recent runs.
+
+<ParamField query="routineId" type="string" required>
+  Routine UUID, e.g. `"rtn_abc123"`.
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Routine object with `id`, `name`, `agentId`, `triggers[]`, `recentRuns[]`, `concurrencyPolicy`, `catchUpPolicy`.
+
+**Use when:** Inspecting a routine's current triggers before modifying them.
+
+**Don't use when:** You need all routine IDs — use `paperclip_list_routines` first to discover them.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Routine not found → verify the ID with `paperclip_list_routines`.
+
+```json
+{
+  "tool": "paperclip_get_routine",
+  "arguments": {
+    "routineId": "rtn_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_routine
+
+Create a new routine and assign it to an agent. Triggers are added separately.
+
+<ParamField body="assigneeAgentId" type="string" required>
+  Agent UUID that will execute this routine, e.g. `"agt_abc123"`.
+</ParamField>
+
+<ParamField body="title" type="string" required>
+  Human-readable routine title, e.g. `"daily-standup"`.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional longer description of the routine's purpose.
+</ParamField>
+
+<ParamField body="concurrencyPolicy" type="string">
+  Controls what happens when a new run fires while a previous one is still active. Values: `allow`, `forbid` (default), `replace`.
+</ParamField>
+
+<ParamField body="catchUpPolicy" type="string">
+  Controls missed runs after downtime. Values: `skip` (default), `run_once`.
+</ParamField>
+
+**Returns:** The created routine object: `id`, `title`, `assigneeAgentId`, `triggers: []`, `createdAt`.
+
+**Use when:** Setting up a scheduled workflow for an agent before attaching a cron trigger.
+
+**Don't use when:** You want to trigger execution immediately — create the routine first, then call `paperclip_run_routine`.
+
+**Errors:**
+- `400` — Validation failure → ensure `title` and `assigneeAgentId` are non-empty.
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — `assigneeAgentId` not found → verify with `paperclip_list_agents`.
+
+```json
+{
+  "tool": "paperclip_create_routine",
+  "arguments": {
+    "assigneeAgentId": "agt_abc123",
+    "title": "daily-standup",
+    "description": "Posts a daily standup summary to the team channel",
+    "concurrencyPolicy": "forbid",
+    "catchUpPolicy": "skip"
+  }
+}
+```
+
+---
+
+## paperclip_update_routine
+
+Update a routine's title, description, or scheduling policies.
+
+<ParamField body="routineId" type="string" required>
+  Routine UUID to update.
+</ParamField>
+
+<ParamField body="title" type="string">
+  New title for the routine.
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description.
+</ParamField>
+
+<ParamField body="concurrencyPolicy" type="string">
+  New concurrency policy: `allow`, `forbid`, or `replace`.
+</ParamField>
+
+<ParamField body="catchUpPolicy" type="string">
+  New catch-up policy: `skip` or `run_once`.
+</ParamField>
+
+**Returns:** The updated routine object with all fields.
+
+**Use when:** Changing a routine's concurrency policy after observing overlapping runs.
+
+**Don't use when:** You need to change the trigger schedule — use `paperclip_update_routine_trigger` for that.
+
+<Warning>
+  This operation is marked `destructive` and `idempotent`. Repeated calls with the same fields are safe, but the change is irreversible without an explicit follow-up update.
+</Warning>
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Routine not found → verify with `paperclip_list_routines`.
+
+```json
+{
+  "tool": "paperclip_update_routine",
+  "arguments": {
+    "routineId": "rtn_abc123",
+    "concurrencyPolicy": "replace"
+  }
+}
+```
+
+---
+
+## paperclip_add_routine_trigger
+
+Add a trigger to an existing routine. Supports `schedule` (cron), `webhook`, and `api` trigger kinds.
+
+<ParamField body="routineId" type="string" required>
+  Routine UUID to attach the trigger to.
+</ParamField>
+
+<ParamField body="kind" type='"schedule" | "webhook" | "api"' required>
+  Trigger kind. Use `schedule` for cron-based execution, `webhook` for HTTP-based invocation, or `api` for programmatic triggering.
+</ParamField>
+
+<ParamField body="cronExpression" type="string">
+  5-field cron expression. **Required when `kind` is `"schedule"`**. Must match the pattern `<minute> <hour> <day> <month> <weekday>`, e.g. `"*/5 * * * *"` for every 5 minutes.
+</ParamField>
+
+<ParamField body="timezone" type="string">
+  IANA timezone for the cron schedule, e.g. `"America/New_York"`. Defaults to `"UTC"`.
+</ParamField>
+
+**Returns:** The created trigger object: `id`, `routineId`, `kind`, `cronExpression`, `createdAt`.
+
+**Use when:** Scheduling a routine to run every 5 minutes after creating it.
+
+**Don't use when:** The trigger already exists — use `paperclip_update_routine_trigger` to modify it.
+
+<Tip>
+  A routine can have multiple triggers. For example, you can attach both a `schedule` trigger (cron) and an `api` trigger so the routine fires on a schedule *and* can be invoked programmatically.
+</Tip>
+
+**Errors:**
+- `400` — Invalid cron expression → must be a 5-field cron, e.g. `"*/5 * * * *"`.
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Routine not found → verify the ID with `paperclip_list_routines`.
+
+```json
+{
+  "tool": "paperclip_add_routine_trigger",
+  "arguments": {
+    "routineId": "rtn_abc123",
+    "kind": "schedule",
+    "cronExpression": "0 9 * * 1-5",
+    "timezone": "America/New_York"
+  }
+}
+```
+
+The example above fires at 09:00 ET on weekdays.
+
+---
+
+## paperclip_update_routine_trigger
+
+Update an existing routine trigger's kind or cron schedule.
+
+<ParamField body="triggerId" type="string" required>
+  Routine trigger UUID to update, e.g. `"trg_abc123"`. Retrieve this from `paperclip_get_routine`.
+</ParamField>
+
+<ParamField body="kind" type='"schedule" | "webhook" | "api"'>
+  New trigger kind.
+</ParamField>
+
+<ParamField body="cronExpression" type="string">
+  New 5-field cron expression for `schedule` triggers, e.g. `"0 9 * * 1-5"`.
+</ParamField>
+
+<ParamField body="timezone" type="string">
+  New IANA timezone for `schedule` triggers.
+</ParamField>
+
+**Returns:** Updated trigger object: `id`, `routineId`, `kind`, `cronExpression`, `updatedAt`.
+
+**Use when:** Changing a routine from every 5 minutes to daily at 9 AM on weekdays.
+
+**Don't use when:** You need to add a new trigger — use `paperclip_add_routine_trigger` instead.
+
+**Errors:**
+- `400` — Invalid cron expression → ensure 5 whitespace-separated fields.
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Trigger not found → verify the ID with `paperclip_get_routine`.
+
+```json
+{
+  "tool": "paperclip_update_routine_trigger",
+  "arguments": {
+    "triggerId": "trg_abc123",
+    "cronExpression": "0 9 * * 1-5",
+    "timezone": "UTC"
+  }
+}
+```
+
+---
+
+## paperclip_delete_routine_trigger
+
+Delete a routine trigger. The routine itself is **not** deleted.
+
+<ParamField body="triggerId" type="string" required>
+  Routine trigger UUID to delete. Retrieve this from `paperclip_get_routine`.
+</ParamField>
+
+**Returns:** A confirmation object indicating the trigger was deleted.
+
+**Use when:** Removing a cron schedule from a routine without deleting the routine itself.
+
+**Don't use when:** You want to delete the entire routine — use `paperclip_delete_routine` for that.
+
+<Warning>
+  This operation is `destructive` and cannot be undone. You will need to recreate the trigger with `paperclip_add_routine_trigger` if you change your mind.
+</Warning>
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Trigger not found → verify the ID with `paperclip_get_routine`.
+
+```json
+{
+  "tool": "paperclip_delete_routine_trigger",
+  "arguments": {
+    "triggerId": "trg_abc123"
+  }
+}
+```
+
+---
+
+## paperclip_run_routine
+
+Manually trigger a routine run immediately, bypassing its schedule.
+
+<ParamField body="routineId" type="string" required>
+  Routine UUID to run, e.g. `"rtn_abc123"`.
+</ParamField>
+
+<ParamField body="agentId" type="string">
+  Agent UUID to run the routine. Overrides the routine's default `assigneeAgentId` for this run only.
+</ParamField>
+
+**Returns:** The created run object: `id`, `routineId`, `status`, `startedAt`.
+
+**Use when:** Testing a routine on-demand before its next scheduled fire, or triggering a one-off execution.
+
+**Don't use when:** You want to check past runs — use `paperclip_list_routine_runs` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Routine not found → verify the ID with `paperclip_list_routines`.
+- `409` — Concurrency policy forbids a concurrent run → wait for the active run to finish, or update `concurrencyPolicy` to `replace`.
+
+```json
+{
+  "tool": "paperclip_run_routine",
+  "arguments": {
+    "routineId": "rtn_abc123"
+  }
+}
+```
+
+---
+
+## paperclip_list_routine_runs
+
+List historical runs for a routine, ordered most-recent first.
+
+<ParamField query="routineId" type="string" required>
+  Routine UUID whose run history to retrieve.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Max runs per page (1–100, default 50).
+</ParamField>
+
+<ParamField query="offset" type="integer">
+  Number of runs to skip for pagination (default 0).
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Run[], total, count, offset, limit, has_more, next_offset }`. Each item contains `id`, `routineId`, `status`, `startedAt`, `finishedAt`, `triggerId`.
+
+**Use when:** Auditing whether a scheduled routine has been firing and completing successfully.
+
+**Don't use when:** You need the routine's triggers or settings — use `paperclip_get_routine` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `404` — Routine not found → verify the ID with `paperclip_list_routines`.
+
+```json
+{
+  "tool": "paperclip_list_routine_runs",
+  "arguments": {
+    "routineId": "rtn_abc123",
+    "limit": 10,
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "items": [
+    {
+      "id": "run_xyz789",
+      "routineId": "rtn_abc123",
+      "status": "completed",
+      "startedAt": "2026-04-16T09:00:01.000Z",
+      "finishedAt": "2026-04-16T09:00:43.000Z",
+      "triggerId": "trg_abc123"
+    }
+  ],
+  "total": 1,
+  "count": 1,
+  "offset": 0,
+  "limit": 10,
+  "has_more": false,
+  "next_offset": null
+}
+```

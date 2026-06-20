@@ -1,0 +1,199 @@
+---
+title: "Attachments tools — upload and manage issue files"
+sidebarTitle: "Attachments"
+description: "Paperclip MCP attachment tools: list, upload (base64), download, and delete file attachments on issues. Upload uses base64-encoded content with explicit MIME type."
+---
+
+Attachment tools let Claude Code agents manage files directly on Paperclip issues — listing what's there, uploading new files from disk, downloading content for inspection, and permanently removing outdated attachments. Files are uploaded from a local absolute path and stored server-side; downloads return the raw bytes as a base64 string so agents can decode and process them in-memory without writing to disk.
+
+<CardGroup cols={2}>
+  <Card title="List Attachments" icon="list" href="#paperclip_list_attachments">
+    Paginate all attachments on an issue to discover IDs
+  </Card>
+  <Card title="Upload Attachment" icon="upload" href="#paperclip_upload_attachment">
+    Attach a local file to an issue by absolute path
+  </Card>
+  <Card title="Download Attachment" icon="download" href="#paperclip_download_attachment">
+    Fetch attachment content as base64
+  </Card>
+  <Card title="Delete Attachment" icon="trash" href="#paperclip_delete_attachment">
+    Permanently remove an attachment by UUID
+  </Card>
+</CardGroup>
+
+---
+
+## paperclip_list_attachments
+
+List all attachments on an issue, returning a paginated envelope of attachment metadata.
+
+<ParamField path="issueId" type="string" required>
+  Issue ID or identifier (e.g. `PAP-21`). Accepts both numeric identifiers and UUID strings.
+</ParamField>
+
+<ParamField path="limit" type="integer">
+  Maximum attachments per page. Range 1–100. Defaults to `50`.
+</ParamField>
+
+<ParamField path="offset" type="integer">
+  Number of attachments to skip for pagination. Defaults to `0`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) produces a human-readable list; `json` returns a structured envelope.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Attachment[], total, count, offset, limit, has_more, next_offset }`. Each `Attachment` item contains: `id`, `filename`, `mimeType`, `size` (bytes), `createdAt`.
+
+**Usage notes:**
+- Use this tool first to discover attachment UUIDs before calling download or delete.
+- If you already have the attachment UUID, call `paperclip_download_attachment` directly.
+- Use `limit` and `offset` to page through issues with many attachments.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 404  | Issue not found | Verify the ID with `paperclip_list_issues` |
+
+```json
+{
+  "tool": "paperclip_list_attachments",
+  "arguments": {
+    "issueId": "PAP-21",
+    "limit": 25,
+    "offset": 0,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_upload_attachment
+
+Upload a local file as an attachment to an issue. The file is read from `filePath` and sent to the Paperclip API using multipart form upload.
+
+<ParamField path="issueId" type="string" required>
+  Issue ID or identifier (e.g. `PAP-22`).
+</ParamField>
+
+<ParamField path="filePath" type="string" required>
+  Absolute path to the local file to upload (e.g. `/tmp/report.pdf`). The path must be absolute and the file must exist on disk.
+</ParamField>
+
+<ParamField path="filename" type="string">
+  Override the filename stored on the server. Defaults to the basename of `filePath`.
+</ParamField>
+
+<ParamField path="mimeType" type="string">
+  MIME type of the file (e.g. `text/plain`, `application/pdf`). Defaults to `application/octet-stream` if omitted.
+</ParamField>
+
+**Returns:** The created attachment record: `id`, `filename`, `mimeType`, `size` (bytes), `createdAt`.
+
+**Usage notes:**
+- Use when attaching a generated report, diff, log file, or any artifact to an issue.
+- The `filePath` must be an absolute path; relative paths will fail with a 400 validation error.
+- To read an existing attachment instead, use `paperclip_download_attachment`.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 400  | Validation failure | Ensure `filePath` is absolute and the file exists |
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 404  | Issue not found | Verify the ID with `paperclip_list_issues` |
+| 413  | File too large | Check Paperclip attachment size limits |
+
+```json
+{
+  "tool": "paperclip_upload_attachment",
+  "arguments": {
+    "issueId": "PAP-22",
+    "filePath": "/tmp/analysis-report.pdf",
+    "filename": "analysis-report.pdf",
+    "mimeType": "application/pdf"
+  }
+}
+```
+
+---
+
+## paperclip_download_attachment
+
+Fetch the raw content of an attachment by its UUID. The response includes the file content encoded as base64 so agents can decode and process it without writing to disk.
+
+<ParamField path="attachmentId" type="string" required>
+  Attachment UUID. Obtain this from `paperclip_list_attachments`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) produces a compact summary with an id, content type, size, and the base64 string. `json` returns the full structured envelope.
+</ParamField>
+
+**Returns:** A fixed envelope with fields: `attachmentId`, `contentType`, `size` (bytes), `contentBase64` (base64-encoded file content). In `markdown` mode a compact human-readable summary is produced; in `json` mode the full envelope is returned.
+
+<Note>
+  The `contentBase64` field contains the complete file bytes encoded as base64. Decode it with `Buffer.from(contentBase64, 'base64')` or the equivalent in your runtime to recover the original file.
+</Note>
+
+**Usage notes:**
+- Use when you need to read and process the contents of a previously uploaded file.
+- For metadata only (id, filename, size) without downloading content, use `paperclip_list_attachments` instead.
+- Large files will be truncated in the response — check `size` before processing.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 404  | Attachment not found | Verify the UUID with `paperclip_list_attachments` |
+
+```json
+{
+  "tool": "paperclip_download_attachment",
+  "arguments": {
+    "attachmentId": "att_abc123def456",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_delete_attachment
+
+Permanently delete an attachment by its UUID. This action cannot be undone.
+
+<Warning>
+  This tool has `destructiveHint: true`. Deletion is permanent and irreversible. Always confirm the correct `attachmentId` with `paperclip_list_attachments` or download and inspect the file with `paperclip_download_attachment` before deleting.
+</Warning>
+
+<ParamField path="attachmentId" type="string" required>
+  Attachment UUID to delete.
+</ParamField>
+
+**Returns:** The deleted attachment stub: `id`, `filename`, confirming the deletion.
+
+**Usage notes:**
+- Use when removing a superseded or mistakenly uploaded file from an issue.
+- If you want to read the file's content first, call `paperclip_download_attachment` before deleting.
+- There is no soft-delete or trash — once deleted the attachment cannot be recovered.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 404  | Attachment not found | Verify the UUID with `paperclip_list_attachments` |
+
+```json
+{
+  "tool": "paperclip_delete_attachment",
+  "arguments": {
+    "attachmentId": "att_abc123def456"
+  }
+}
+```

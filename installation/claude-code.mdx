@@ -1,0 +1,150 @@
+---
+title: "Set up Paperclip MCP in Claude Code"
+sidebarTitle: "Claude Code"
+description: "Configure Paperclip MCP as an MCP server in Claude Code using the CLI or settings.json. Covers npm and Docker variants with all required environment variables."
+---
+
+Claude Code has first-class MCP support: you can register Paperclip MCP in seconds with a single `claude mcp add` command, or drop a JSON block directly into `settings.json` if you prefer manual control. Both approaches result in the same 104 tools being available to every Claude Code session that picks up the config — whether you scope it to a single project or set it globally for your user.
+
+## Environment variables
+
+All six variables are read at server startup. The four marked **Yes** are required — the server exits immediately if any are missing.
+
+| Variable | Required | Description |
+|---|---|---|
+| `PAPERCLIP_API_KEY` | **Yes** | Bearer token for API authentication |
+| `PAPERCLIP_API_URL` | **Yes** | Base URL of the Paperclip API, e.g. `http://127.0.0.1:3100` |
+| `PAPERCLIP_AGENT_ID` | **Yes** | UUID of the agent running this MCP server |
+| `PAPERCLIP_COMPANY_ID` | **Yes** | UUID of the company (used for company-scoped endpoints) |
+| `PAPERCLIP_RUN_ID` | No | Heartbeat run ID — injected automatically by Paperclip during agent runs |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | No | HTTP request timeout in milliseconds (default: `30000`) |
+
+## Option A — CLI (`claude mcp add`)
+
+The fastest path. Run one command and Claude Code writes the config entry for you.
+
+<Steps>
+  <Step title="Open a terminal">
+    Make sure `claude` is on your `PATH`. You can verify with `claude --version`.
+  </Step>
+  <Step title="Run the add command for your preferred variant">
+    <Tabs>
+      <Tab title="npm (recommended)">
+        No container runtime needed. Requires Node.js ≥ 20 on the host.
+
+        ```bash
+        claude mcp add paperclip \
+          -e PAPERCLIP_API_KEY=YOUR_API_KEY \
+          -e PAPERCLIP_API_URL=YOUR_API_URL \
+          -e PAPERCLIP_AGENT_ID=YOUR_AGENT_ID \
+          -e PAPERCLIP_COMPANY_ID=YOUR_COMPANY_ID \
+          -- npx -y paperclip-mcp
+        ```
+      </Tab>
+      <Tab title="Docker / Podman">
+        Isolated runtime — no Node.js required on the host. Replace `podman` with `docker` if you are using Docker.
+
+        ```bash
+        claude mcp add paperclip \
+          -- podman run -i --rm \
+          -e PAPERCLIP_API_KEY=YOUR_API_KEY \
+          -e PAPERCLIP_API_URL=YOUR_API_URL \
+          -e PAPERCLIP_AGENT_ID=YOUR_AGENT_ID \
+          -e PAPERCLIP_COMPANY_ID=YOUR_COMPANY_ID \
+          ghcr.io/bruhsb/paperclip-mcp:2.1.0
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  <Step title="Verify">
+    Restart Claude Code or run `/mcp` to reload servers, then ask: **"What paperclip tools do you have?"** Expect **104 tools** listed.
+  </Step>
+</Steps>
+
+## Option B — settings.json
+
+Manually edit the settings file to add or update the `paperclip` entry under `mcpServers`. Create the file if it does not exist.
+
+### Config file scope
+
+| Scope | Path |
+|---|---|
+| **Global** (all projects) | `~/.claude/settings.json` |
+| **Project** (version-controlled) | `.claude/settings.json` in your project root |
+
+<Tip>
+  Use the project-scoped file to commit the config alongside your code so your whole team picks it up automatically. Use the global file for personal or cross-project setups.
+</Tip>
+
+### Config blocks
+
+<Tabs>
+  <Tab title="npm (recommended)">
+    ```json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "npx",
+          "args": ["-y", "paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_KEY": "YOUR_API_KEY",
+            "PAPERCLIP_API_URL": "YOUR_API_URL",
+            "PAPERCLIP_AGENT_ID": "YOUR_AGENT_ID",
+            "PAPERCLIP_COMPANY_ID": "YOUR_COMPANY_ID"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Docker / Podman">
+    Replace `podman` with `docker` in both `command` and the equivalent args if you are using Docker.
+
+    ```json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "podman",
+          "args": [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "PAPERCLIP_API_KEY=YOUR_API_KEY",
+            "-e",
+            "PAPERCLIP_API_URL=YOUR_API_URL",
+            "-e",
+            "PAPERCLIP_AGENT_ID=YOUR_AGENT_ID",
+            "-e",
+            "PAPERCLIP_COMPANY_ID=YOUR_COMPANY_ID",
+            "ghcr.io/bruhsb/paperclip-mcp:2.1.0"
+          ]
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  For Paperclip-orchestrated heartbeat runs, `PAPERCLIP_RUN_ID` is injected automatically into the process environment — you do not need to add it to `settings.json`.
+</Note>
+
+## Verification
+
+<Steps>
+  <Step title="Restart Claude Code or reload MCP servers">
+    Run `/mcp` inside a Claude Code session to reload all configured servers without a full restart.
+  </Step>
+  <Step title="Confirm tool count">
+    Ask Claude: **"What paperclip tools do you have?"**
+
+    You should see **104 tools** listed. If the count is lower or the server does not appear at all, check the troubleshooting guide.
+  </Step>
+</Steps>
+
+## See also
+
+- **Troubleshooting** — server not connecting, auth errors, network issues
+- **Auth keys** — how to obtain and rotate your `PAPERCLIP_API_KEY`
+- [Docker / Podman guide](/installation/docker) — building and running the container image locally

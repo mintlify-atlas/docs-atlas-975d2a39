@@ -1,72 +1,123 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Paperclip MCP",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#848484",
+    "light": "#1d1d1d",
+    "dark": "#eaeaea"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
+  "favicon": "https://media.brand.dev/5585dfe7-544a-47ce-88d6-8ccb0f0a6e35.svg",
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/bruhsb/paperclip-mcp"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/bruhsb/paperclip-mcp"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Installation",
+            "pages": [
+              "installation/overview",
+              "installation/claude-code",
+              "installation/cursor",
+              "installation/vscode",
+              "installation/windsurf",
+              "installation/docker"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/authentication",
+              "guides/issue-lifecycle",
+              "guides/agent-skills",
+              "guides/local-stack"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/error-handling"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/environment-variables",
+              "reference/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tool Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/overview"
+            ]
+          },
+          {
+            "group": "Core",
+            "pages": [
+              "tools/identity",
+              "tools/issues",
+              "tools/comments",
+              "tools/documents"
+            ]
+          },
+          {
+            "group": "Organization",
+            "pages": [
+              "tools/agents",
+              "tools/approvals",
+              "tools/goals",
+              "tools/projects"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "tools/routines",
+              "tools/activity",
+              "tools/runs",
+              "tools/dashboard"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "tools/attachments",
+              "tools/labels",
+              "tools/plugins",
+              "tools/secrets",
+              "tools/company",
+              "tools/feedback",
+              "tools/company-import"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

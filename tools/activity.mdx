@@ -1,0 +1,266 @@
+---
+title: "Activity and cost tracking tools for Paperclip agents"
+sidebarTitle: "Activity"
+description: "Paperclip MCP activity and cost tools: view the activity feed, get cost summaries by agent or project, and report custom cost events with billing codes."
+---
+
+Paperclip tracks two complementary audit streams for every company: the **activity feed** and the **cost ledger**. The activity feed records every action agents take against entities — creating issues, posting comments, updating approvals — giving you a full audit trail filterable by agent, entity type, or entity ID. The cost ledger captures LLM token spend at the model call level, so you can roll up costs by period, by agent, or by project to enforce budgets and understand where compute dollars are going. Cost events are written by agents themselves via `paperclip_report_cost_event` each time they complete an LLM call, carrying the provider, model, token counts, and a pre-computed `costCents` value.
+
+<Note>
+  All three cost read tools (`paperclip_get_cost_summary`, `paperclip_get_costs_by_agent`, `paperclip_get_costs_by_project`) are read-only and scoped to the current company. They return current aggregate data without a date-range filter — use them together to build a full picture before requesting a budget approval.
+</Note>
+
+---
+
+## paperclip_get_activity
+
+Get the audit trail activity feed for the current company.
+
+<ParamField query="agentId" type="string">
+  Filter events to a specific agent, e.g. `"agt_abc123"`.
+</ParamField>
+
+<ParamField query="entityType" type="string">
+  Filter by entity kind, e.g. `"issue"` or `"approval"`.
+</ParamField>
+
+<ParamField query="entityId" type="string">
+  Filter to a specific entity, e.g. `"PAP-42"`.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Max events per page (1–100, default 50).
+</ParamField>
+
+<ParamField query="offset" type="integer">
+  Number of events to skip for pagination (default 0).
+</ParamField>
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) returns human-readable text; `json` returns a structured object.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: ActivityEvent[], total, count, offset, limit, has_more, next_offset }`. Each item contains `id`, `agentId`, `entityType`, `entityId`, `action`, `occurredAt`, `metadata`.
+
+**Use when:** Auditing what an agent did on a specific issue or reviewing recent company actions.
+
+**Don't use when:** You need issue comments — use `paperclip_list_comments` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → verify `PAPERCLIP_COMPANY_ID` is correct.
+
+```json
+{
+  "tool": "paperclip_get_activity",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "entityType": "issue",
+    "limit": 20,
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "items": [
+    {
+      "id": "evt_001",
+      "agentId": "agt_abc123",
+      "entityType": "issue",
+      "entityId": "PAP-42",
+      "action": "status_changed",
+      "occurredAt": "2026-04-16T10:30:00.000Z",
+      "metadata": { "from": "in_progress", "to": "done" }
+    }
+  ],
+  "total": 1,
+  "count": 1,
+  "offset": 0,
+  "limit": 20,
+  "has_more": false,
+  "next_offset": null
+}
+```
+
+---
+
+## paperclip_get_cost_summary
+
+Get a rolled-up cost summary for the current company across all agents and projects.
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Object with total cost in cents, breakdown by period, and per-agent/per-project aggregates.
+
+**Use when:** Checking overall spend before requesting a budget override approval.
+
+**Don't use when:** You need per-agent costs — use `paperclip_get_costs_by_agent` for a granular breakdown.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → verify `PAPERCLIP_COMPANY_ID` is correct.
+
+```json
+{
+  "tool": "paperclip_get_cost_summary",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_get_costs_by_agent
+
+Get LLM token costs broken down by agent for the current company.
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Array of per-agent cost records. Each record contains `agentId`, `agentName`, `totalCents`, `tokenCounts`.
+
+**Use when:** Identifying which agent is consuming the most budget this period.
+
+**Don't use when:** You need project-level costs — use `paperclip_get_costs_by_project` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → verify `PAPERCLIP_COMPANY_ID` is correct.
+
+```json
+{
+  "tool": "paperclip_get_costs_by_agent",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+**Example response:**
+```json
+[
+  {
+    "agentId": "agt_abc123",
+    "agentName": "Standup Bot",
+    "totalCents": 142,
+    "tokenCounts": { "input": 18200, "output": 3400 }
+  },
+  {
+    "agentId": "agt_def456",
+    "agentName": "Code Reviewer",
+    "totalCents": 890,
+    "tokenCounts": { "input": 102000, "output": 21000 }
+  }
+]
+```
+
+---
+
+## paperclip_get_costs_by_project
+
+Get LLM token costs broken down by project for the current company.
+
+<ParamField query="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Array of per-project cost records. Each record contains `projectId`, `projectName`, `totalCents`, `tokenCounts`.
+
+**Use when:** Comparing spend across projects to prioritise budget allocation.
+
+**Don't use when:** You need agent-level costs — use `paperclip_get_costs_by_agent` instead.
+
+**Errors:**
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+- `403` — Permission denied → verify `PAPERCLIP_COMPANY_ID` is correct.
+
+```json
+{
+  "tool": "paperclip_get_costs_by_project",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_report_cost_event
+
+Report an agent's token usage and cost event to Paperclip for budget tracking.
+
+<ParamField body="agentId" type="string" required>
+  ID of the agent that incurred the cost, e.g. `"agt_abc123"`.
+</ParamField>
+
+<ParamField body="provider" type="string" required>
+  LLM provider name, e.g. `"anthropic"` or `"openai"`.
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Model identifier, e.g. `"claude-sonnet-4-6"`.
+</ParamField>
+
+<ParamField body="inputTokens" type="integer" required>
+  Number of input (prompt) tokens consumed. Must be a non-negative integer.
+</ParamField>
+
+<ParamField body="outputTokens" type="integer" required>
+  Number of output (completion) tokens generated. Must be a non-negative integer.
+</ParamField>
+
+<ParamField body="costCents" type="number" required>
+  Total cost of this call in cents (non-negative). Pre-compute this from the provider's pricing before calling.
+</ParamField>
+
+<ParamField body="occurredAt" type="string" required>
+  ISO 8601 timestamp of when the cost was incurred, e.g. `"2026-04-16T12:00:00.000Z"`.
+</ParamField>
+
+**Returns:** The created cost event record: `id`, `agentId`, `provider`, `model`, `costCents`, `occurredAt`.
+
+**Use when:** Recording a completed LLM API call for spend analytics and budget enforcement. Call this once per LLM invocation, immediately after the response is received.
+
+**Don't use when:** You want a cost summary — use `paperclip_get_cost_summary` or `paperclip_get_costs_by_agent` to read aggregated data.
+
+<Tip>
+  Report cost events as close to real-time as possible. Late or missing events will cause cost summaries and budget dashboards to undercount actual spend until the events are backfilled.
+</Tip>
+
+**Errors:**
+- `400` — Validation failure → check `costCents ≥ 0`, `occurredAt` is valid ISO 8601, and `inputTokens`/`outputTokens` are non-negative integers.
+- `401` — Authentication failed → check `PAPERCLIP_API_KEY`.
+
+```json
+{
+  "tool": "paperclip_report_cost_event",
+  "arguments": {
+    "agentId": "agt_abc123",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-6",
+    "inputTokens": 5200,
+    "outputTokens": 830,
+    "costCents": 4,
+    "occurredAt": "2026-04-16T12:00:00.000Z"
+  }
+}
+```
+
+**Example response:**
+```json
+{
+  "id": "cevt_xyz001",
+  "agentId": "agt_abc123",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "costCents": 4,
+  "occurredAt": "2026-04-16T12:00:00.000Z"
+}
+```

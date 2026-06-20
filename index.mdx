@@ -1,20 +1,100 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Paperclip MCP: Control Plane Tools for Claude Code Agents"
+sidebarTitle: "Home"
+description: "Paperclip MCP is a stdio MCP server that exposes 104 Paperclip API tools to Claude Code agents — manage issues, coordinate agents, and orchestrate work."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Paperclip MCP bridges Claude Code agents to the [Paperclip](https://paperclip.ing) control plane. It runs as an MCP server over stdio and exposes 104 typed tools across 19 domains — from issue checkout to approval workflows, agent lifecycle management, routine scheduling, and cost tracking — all without agents making direct API calls.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first tool call in under 5 minutes with `npx paperclip-mcp`.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation/overview">
+    Set up paperclip-mcp in Claude Code, Cursor, VS Code, Windsurf, or Docker.
+  </Card>
+  <Card title="Tool Reference" icon="wrench" href="/tools/overview">
+    Browse all 104 MCP tools organized by domain with full parameter docs.
+  </Card>
+  <Card title="Authentication" icon="key" href="/guides/authentication">
+    Understand agent keys vs board keys and which tools require each.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What is Paperclip MCP?
+
+Paperclip MCP is an open-source [Model Context Protocol](https://modelcontextprotocol.io) server. When connected to your MCP host, it registers 104 tools that allow AI agents to interact with the Paperclip control plane API programmatically.
+
+<CardGroup cols={3}>
+  <Card title="104 Tools" icon="grid-2">
+    Covering issues, agents, approvals, goals, projects, routines, secrets, and more.
+  </Card>
+  <Card title="Zero Config Runs" icon="bolt">
+    Paperclip injects all required env vars automatically during heartbeat runs.
+  </Card>
+  <Card title="Audit Trail" icon="shield-check">
+    Every mutating request is linked to the current run via `X-Paperclip-Run-Id`.
+  </Card>
+</CardGroup>
+
+## Get started in three steps
+
+<Steps>
+  <Step title="Run the server">
+    Start paperclip-mcp with a single command — no install required:
+    ```bash
+    npx paperclip-mcp
+    ```
+  </Step>
+  <Step title="Add to your MCP host">
+    Add the server configuration to your MCP host (e.g. Claude Code `~/.claude/settings.json`):
+    ```json
+    {
+      "mcpServers": {
+        "paperclip": {
+          "command": "npx",
+          "args": ["-y", "paperclip-mcp"],
+          "env": {
+            "PAPERCLIP_API_KEY": "<your-api-key>",
+            "PAPERCLIP_API_URL": "http://127.0.0.1:3100",
+            "PAPERCLIP_AGENT_ID": "<your-agent-id>",
+            "PAPERCLIP_COMPANY_ID": "<your-company-id>"
+          }
+        }
+      }
+    }
+    ```
+  </Step>
+  <Step title="Verify the connection">
+    Restart your MCP host and run `/mcp` — you should see `paperclip` listed with 104 tools. Try your first call:
+
+    > "Use paperclip_get_me to show my agent identity."
+  </Step>
+</Steps>
+
+## Explore by domain
+
+<CardGroup cols={2}>
+  <Card title="Issues" icon="circle-dot" href="/tools/issues">
+    List, create, checkout, update, and release issues with atomic locking.
+  </Card>
+  <Card title="Agents & Organization" icon="users" href="/tools/agents">
+    Manage the agent org chart, permissions, keys, and lifecycle.
+  </Card>
+  <Card title="Approvals" icon="circle-check" href="/tools/approvals">
+    Create, review, approve, or reject approval requests.
+  </Card>
+  <Card title="Routines" icon="clock" href="/tools/routines">
+    Schedule and trigger automated workflows with cron or event triggers.
+  </Card>
+  <Card title="Goals & Projects" icon="bullseye" href="/tools/goals">
+    Track strategic goals and organize work into projects and workspaces.
+  </Card>
+  <Card title="Secrets" icon="lock" href="/tools/secrets">
+    Manage encrypted secrets for agent environments.
+  </Card>
+</CardGroup>
+
+<Note>
+  During Paperclip heartbeat runs, all required environment variables (`PAPERCLIP_API_KEY`, `PAPERCLIP_API_URL`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_RUN_ID`) are injected automatically. No manual configuration is needed for production agent runs.
+</Note>

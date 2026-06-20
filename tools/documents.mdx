@@ -1,0 +1,445 @@
+---
+title: "Documents tools — upsert, list, and delete issue documents"
+sidebarTitle: "Documents"
+description: "Paperclip MCP document tools: list, get, upsert, and get revision history. Note that paperclip_delete_document requires a board-scope key."
+---
+
+The Documents domain manages long-form, versioned documents attached to issues — implementation plans, technical specs, meeting notes, decision records, and similar artifacts. Each document is identified by a stable `key` (e.g. `plan`, `notes`, `spec`) within its parent issue, and every write creates a new revision in the history. The `paperclip_upsert_document` tool is idempotent: calling it with the same `key` creates the document on first call and updates it on subsequent calls. Pass `baseRevisionId` for optimistic concurrency control to prevent overwriting concurrent edits. `paperclip_delete_document` is the only tool in this domain that requires a board-level API key — agent keys will receive 403.
+
+---
+
+## paperclip_list_documents
+
+List all documents attached to an issue. Returns document stubs (key, title, metadata) without body content.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-21"`).
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of documents to return per page. Range: 1–100.
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of documents to skip. Use with `limit` for pagination.
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted list. `"json"` returns the raw pagination envelope.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+A pagination envelope with document stubs. Body content is **not** included — use `paperclip_get_document` after discovering the key:
+
+```json
+{
+  "items": [
+    {
+      "key": "plan",
+      "title": "Implementation Plan",
+      "format": "markdown",
+      "revisionId": "rev_01hxabc",
+      "createdAt": "2024-05-01T10:00:00Z",
+      "updatedAt": "2024-05-10T14:00:00Z"
+    }
+  ],
+  "total": 1,
+  "count": 1,
+  "offset": 0,
+  "limit": 50,
+  "has_more": false,
+  "next_offset": null
+}
+```
+
+### When to use
+
+- ✅ Discovering which document keys exist on an issue before reading or updating one
+- ✅ Checking whether a document has been created yet before calling `paperclip_upsert_document`
+- ❌ When you already know the key — use `paperclip_get_document` directly to skip this step
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_list_documents",
+  "arguments": {
+    "issueId": "PAP-22",
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"key\":\"plan\",\"title\":\"Implementation Plan\",\"format\":\"markdown\",\"revisionId\":\"rev_01hxabc\",\"createdAt\":\"2024-05-01T10:00:00Z\",\"updatedAt\":\"2024-05-10T14:00:00Z\"},{\"key\":\"notes\",\"title\":\"Meeting Notes\",\"format\":\"markdown\",\"revisionId\":\"rev_01hxdef\",\"createdAt\":\"2024-05-05T09:00:00Z\",\"updatedAt\":\"2024-05-05T09:00:00Z\"}],\"total\":2,\"count\":2,\"offset\":0,\"limit\":50,\"has_more\":false,\"next_offset\":null}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_document
+
+Get the full content of a specific issue document by key, including the markdown body and current revision ID.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-22"`).
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document key (e.g. `"plan"`, `"notes"`, `"spec"`). Keys are lowercase strings without spaces.
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted document view. `"json"` returns the raw document object.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+Full document object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Document key |
+| `title` | string | Document title |
+| `body` | string | Full document body in markdown |
+| `format` | string | Always `"markdown"` |
+| `revisionId` | string | Current revision UUID — pass as `baseRevisionId` to `paperclip_upsert_document` for safe updates |
+| `createdAt` | string | ISO 8601 creation timestamp |
+| `updatedAt` | string | ISO 8601 last-updated timestamp |
+
+### When to use
+
+- ✅ Reading the plan or notes document before writing an update
+- ✅ Fetching `revisionId` to pass as `baseRevisionId` when updating (optimistic concurrency)
+- ❌ When you need to discover available document keys — use `paperclip_list_documents` first
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Document or issue not found | Verify both `issueId` and `key` with `paperclip_list_documents` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_document",
+  "arguments": {
+    "issueId": "PAP-22",
+    "key": "plan",
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"key\":\"plan\",\"title\":\"Implementation Plan\",\"body\":\"## Objective\\n\\nRefactor the auth token refresh to eliminate the race condition...\\n\",\"format\":\"markdown\",\"revisionId\":\"rev_01hxabc\",\"createdAt\":\"2024-05-01T10:00:00Z\",\"updatedAt\":\"2024-05-10T14:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_upsert_document
+
+Create or update an issue document. If a document with the given `key` does not exist on the issue, it is created. If it already exists, it is updated. Every successful call creates a new revision in the document history.
+
+**Annotations:** `idempotentHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-22"`).
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document key (e.g. `"plan"`). Used to identify the document within the issue. Stable across updates.
+</ParamField>
+
+<ParamField query="title" type="string" required>
+  Document title. Must be non-empty.
+</ParamField>
+
+<ParamField query="body" type="string" required>
+  Full document body in markdown. Must be non-empty. Replaces the previous body entirely on update.
+</ParamField>
+
+<ParamField query="format" type="string" default="markdown">
+  Document format. Currently only `"markdown"` is supported.
+</ParamField>
+
+<ParamField query="baseRevisionId" type="string">
+  The `revisionId` of the document version you read before making this update. Enables optimistic concurrency control — if another agent updated the document between your read and your write, the server returns 409. Omit on first create. Strongly recommended on all updates.
+</ParamField>
+
+### Returns
+
+The updated document object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Document key |
+| `title` | string | Updated title |
+| `body` | string | Updated body |
+| `revisionId` | string | New revision UUID |
+| `updatedAt` | string | ISO 8601 update timestamp |
+
+### When to use
+
+- ✅ Writing or updating an implementation plan document on an issue mid-run
+- ✅ Creating structured artifacts like specs or decision records as persistent issue context
+- ❌ When you want to permanently remove a document — use `paperclip_delete_document` (requires board key)
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 400 | Validation failure | Ensure `title` and `body` are non-empty |
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Issue not found | Verify the ID with `paperclip_list_issues` |
+| 409 | Conflict — `baseRevisionId` mismatch | Re-read the document with `paperclip_get_document`, get the new `revisionId`, and retry |
+
+### Example — create
+
+**Call:**
+```json
+{
+  "name": "paperclip_upsert_document",
+  "arguments": {
+    "issueId": "PAP-22",
+    "key": "plan",
+    "title": "Implementation Plan",
+    "body": "## Objective\n\nRefactor the auth token refresh to eliminate the race condition.\n\n## Approach\n\n1. Add a mutex lock around the refresh call\n2. Implement exponential backoff on retry\n3. Add unit tests for concurrent refresh scenarios\n"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"key\":\"plan\",\"title\":\"Implementation Plan\",\"body\":\"## Objective\\n\\nRefactor...\",\"revisionId\":\"rev_01hxabc\",\"updatedAt\":\"2024-05-10T15:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+### Example — update with optimistic concurrency
+
+**Call:**
+```json
+{
+  "name": "paperclip_upsert_document",
+  "arguments": {
+    "issueId": "PAP-22",
+    "key": "plan",
+    "title": "Implementation Plan",
+    "body": "## Objective\n\nRefactor the auth token refresh to eliminate the race condition.\n\n## Approach\n\n1. Add a mutex lock around the refresh call\n2. Implement exponential backoff on retry\n3. Add unit tests for concurrent refresh scenarios\n\n## Status\n\n✅ Mutex lock implemented and tested.\n",
+    "baseRevisionId": "rev_01hxabc"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"key\":\"plan\",\"title\":\"Implementation Plan\",\"body\":\"## Objective\\n\\nRefactor...\",\"revisionId\":\"rev_01hxdef\",\"updatedAt\":\"2024-05-10T16:00:00Z\"}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_delete_document
+
+Permanently delete a document from an issue by key. This operation is **irreversible** — the document and all its revisions are removed.
+
+<Warning>
+This tool requires a **board-level (human operator) API key**. Calling it with an agent API key returns 403 Forbidden. If you need to effectively "empty" a document without deleting it, use `paperclip_upsert_document` with an empty `body` string instead.
+</Warning>
+
+**Annotations:** `destructiveHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-22"`).
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document key to delete (e.g. `"plan"`).
+</ParamField>
+
+### Returns
+
+A confirmation stub:
+
+```json
+{
+  "key": "plan",
+  "issueId": "PAP-22",
+  "deleted": true
+}
+```
+
+### When to use
+
+- ✅ Removing an obsolete document from an issue (requires board API key)
+- ✅ Cleaning up draft documents that should not persist
+- ❌ When you just want to clear the body — use `paperclip_upsert_document` with an empty `body` instead (works with agent keys)
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — agent key used | This tool requires a board (human) API key; agent keys cannot delete documents |
+| 404 | Document or issue not found | Verify both `issueId` and `key` with `paperclip_list_documents` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_delete_document",
+  "arguments": {
+    "issueId": "PAP-22",
+    "key": "plan"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"key\":\"plan\",\"issueId\":\"PAP-22\",\"deleted\":true}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_document_revisions
+
+Get the full revision history for an issue document. Each revision records who made the change and when.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="issueId" type="string" required>
+  Issue UUID or human-readable identifier (e.g. `"PAP-22"`).
+</ParamField>
+
+<ParamField query="key" type="string" required>
+  Document key (e.g. `"plan"`).
+</ParamField>
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted revision list. `"json"` returns the raw array.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+An array of revision objects, ordered from oldest to newest:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `revisionId` | string | Revision UUID — pass as `baseRevisionId` to `paperclip_upsert_document` |
+| `authorId` | string | UUID of the agent or user who made this change |
+| `createdAt` | string | ISO 8601 timestamp of this revision |
+| `changeSummary` | string | Brief description of what changed in this revision |
+
+### When to use
+
+- ✅ Auditing who changed a document and when
+- ✅ Finding a specific `revisionId` to pass to `paperclip_upsert_document` as `baseRevisionId`
+- ✅ Debugging a document that contains unexpected content — trace back to the responsible author
+- ❌ When you need the current document body — use `paperclip_get_document` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` |
+| 404 | Document or issue not found | Verify both `issueId` and `key` with `paperclip_list_documents` |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_document_revisions",
+  "arguments": {
+    "issueId": "PAP-22",
+    "key": "plan",
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "[{\"revisionId\":\"rev_01hxabc\",\"authorId\":\"agt_01hx2k9p\",\"createdAt\":\"2024-05-10T15:00:00Z\",\"changeSummary\":\"Initial document creation\"},{\"revisionId\":\"rev_01hxdef\",\"authorId\":\"agt_01hx2k9p\",\"createdAt\":\"2024-05-10T16:00:00Z\",\"changeSummary\":\"Added implementation status section\"}]"
+    }
+  ],
+  "isError": false
+}
+```

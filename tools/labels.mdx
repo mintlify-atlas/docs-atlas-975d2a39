@@ -1,0 +1,105 @@
+---
+title: "Labels tools — manage issue labels in Paperclip"
+sidebarTitle: "Labels"
+description: "Paperclip MCP label tools: paperclip_list_labels retrieves all company labels, paperclip_create_label creates a new label with a name and hex color."
+---
+
+Labels in Paperclip are company-wide taxonomy entries — each label has a name, an optional hex color, and a UUID. They can be attached to issues via the `labelIds` field when creating or updating an issue, making them the primary mechanism for categorizing work. The two label tools cover the full lifecycle: list existing labels to build a name-to-UUID cache, and create new labels when a required taxonomy entry is missing.
+
+<CardGroup cols={2}>
+  <Card title="List Labels" icon="tags" href="#paperclip_list_labels">
+    Retrieve all labels defined for the current company
+  </Card>
+  <Card title="Create Label" icon="tag" href="#paperclip_create_label">
+    Create a new label with a name and optional hex color
+  </Card>
+</CardGroup>
+
+<Note>
+  Labels are scoped to the company set by `PAPERCLIP_COMPANY_ID`. To apply a label to an issue, pass the label UUID in the `labelIds` array when calling `paperclip_create_issue` or `paperclip_update_issue`.
+</Note>
+
+---
+
+## paperclip_list_labels
+
+List all labels defined for the current company, returning a paginated envelope.
+
+<ParamField path="limit" type="integer">
+  Maximum labels per page. Range 1–100. Defaults to `50`.
+</ParamField>
+
+<ParamField path="offset" type="integer">
+  Number of labels to skip for pagination. Defaults to `0`.
+</ParamField>
+
+<ParamField path="response_format" type='"markdown" | "json"'>
+  Output format. `markdown` (default) produces a human-readable list; `json` returns a structured envelope.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Label[], total, count, offset, limit, has_more, next_offset }`. Each `Label` item contains: `id`, `name`, `color` (hex string), `createdAt`.
+
+**Usage notes:**
+- Call this tool at the start of a run to build a local `name → UUID` cache for labels you plan to reference.
+- If you already have the label UUID, pass it directly to the issue tools — no need to list again.
+- Use `limit` and `offset` to page through companies with large label taxonomies.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 403  | Permission denied | Verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_list_labels",
+  "arguments": {
+    "limit": 100,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_label
+
+Create a new label for the current company. Labels must have unique names within a company — check for existence with `paperclip_list_labels` before creating.
+
+<ParamField path="name" type="string" required>
+  Label name. Typically namespaced for clarity (e.g. `source:agent`, `type:bug`, `priority:high`). Must be non-empty.
+</ParamField>
+
+<ParamField path="color" type="string">
+  A 6-digit hex color string including the `#` prefix (e.g. `#6366f1`). Omit to use the server default color.
+</ParamField>
+
+**Returns:** The created label object: `id`, `name`, `color`, `createdAt`.
+
+<Tip>
+  Use a namespaced naming convention like `source:agent` or `type:bug` to keep your label taxonomy organized and unambiguous as it grows.
+</Tip>
+
+**Usage notes:**
+- Use this during a "Label Bootstrap" step to seed missing taxonomy labels before processing issues.
+- Always check `paperclip_list_labels` first — creating a duplicate name will return a 409 conflict.
+- The `color` value must be exactly 6 hex digits with a leading `#`; values like `#fff` or `red` will fail validation.
+
+**Errors:**
+
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| 400  | Validation failure | Check name is non-empty; color must be valid 6-digit hex |
+| 401  | Authentication failed | Check `PAPERCLIP_API_KEY` |
+| 409  | Label name already exists | Fetch the existing UUID from `paperclip_list_labels` |
+
+```json
+{
+  "tool": "paperclip_create_label",
+  "arguments": {
+    "name": "source:agent",
+    "color": "#6366f1"
+  }
+}
+```

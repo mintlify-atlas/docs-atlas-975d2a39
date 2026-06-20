@@ -1,0 +1,129 @@
+---
+title: "Paperclip MCP environment variable reference"
+sidebarTitle: "Environment Variables"
+description: "All six Paperclip MCP environment variables — required and optional — with format requirements, startup validation behavior, and local dev examples."
+---
+
+Paperclip MCP reads its entire configuration from environment variables. Four are required and two are optional. The server validates all required variables synchronously at startup — if any are missing, the process exits immediately with a descriptive error message before accepting a single MCP connection. There is no runtime fallback or deferred validation.
+
+## Variable reference
+
+| Variable | Required | Default | Purpose |
+|---|:---:|---|---|
+| `PAPERCLIP_API_KEY` | Yes | — | Bearer token used in every HTTP request (`Authorization: Bearer <key>`) |
+| `PAPERCLIP_API_URL` | Yes | — | Base URL of the Paperclip control plane, e.g. `http://127.0.0.1:3100` |
+| `PAPERCLIP_AGENT_ID` | Yes | — | UUID of the agent running this MCP server instance |
+| `PAPERCLIP_COMPANY_ID` | Yes | — | UUID of the company — used in all company-scoped API paths |
+| `PAPERCLIP_RUN_ID` | No | — | Heartbeat run ID; adds `X-Paperclip-Run-Id` header to all mutating requests |
+| `PAPERCLIP_REQUEST_TIMEOUT_MS` | No | `30000` | HTTP request timeout in milliseconds |
+
+## Required variables
+
+### PAPERCLIP_API_KEY
+
+The bearer token sent with every HTTP request as `Authorization: Bearer <PAPERCLIP_API_KEY>`. Two key types are valid:
+
+- **Run-scoped JWT** (production): issued automatically by the Paperclip runtime at the start of each heartbeat. Valid only for the duration of that run. This is the expected value in production — you never set it manually.
+- **Long-lived agent key or board key** (development): generated from your Paperclip account settings. Use these for local development and testing when no Paperclip runtime is orchestrating the run.
+
+<Warning>
+Never commit an API key to source control. Use your MCP host's `env` block (in `~/.claude/settings.json`) or a `.env` file that is listed in `.gitignore`.
+</Warning>
+
+### PAPERCLIP_API_URL
+
+The base URL of the Paperclip API server. The MCP server prepends this URL to all API paths it constructs (e.g. `/api/companies/:id/issues`).
+
+**Format requirements:**
+- No trailing slash: `http://127.0.0.1:3100` ✅ — `http://127.0.0.1:3100/` ❌
+- No `/api` suffix: `http://127.0.0.1:3100` ✅ — `http://127.0.0.1:3100/api` ❌
+- Must include protocol: `https://api.example.com` ✅ — `api.example.com` ❌
+
+### PAPERCLIP_AGENT_ID
+
+The UUID of the agent whose identity this MCP server instance represents. The client exposes this value via `client.agentId` and tool handlers use it when constructing agent-scoped API paths (e.g. `/api/agents/:agentId/...`).
+
+### PAPERCLIP_COMPANY_ID
+
+The UUID of the company that owns all resources this session will read or modify. Exposed via `client.companyId`. Most API paths are scoped under `/api/companies/:companyId/...`.
+
+## Optional variables
+
+### PAPERCLIP_RUN_ID
+
+When set, the client injects `X-Paperclip-Run-Id: <PAPERCLIP_RUN_ID>` into every mutating request (`POST`, `PATCH`, `PUT`, `DELETE`). The Paperclip API uses this header to link each state change to the originating heartbeat run, creating a complete audit trail.
+
+<Note>
+In production, `PAPERCLIP_RUN_ID` is injected automatically by the Paperclip runtime. You do not need to set it manually during a live agent run. It is omitted from read requests (`GET`) because reads do not create audit events.
+</Note>
+
+### PAPERCLIP_REQUEST_TIMEOUT_MS
+
+Controls the `AbortSignal.timeout` value applied to every `fetch` call in `PaperclipClient`. If a request takes longer than this many milliseconds, the signal fires and `handleApiError` returns an `isError: true` result with a timeout message.
+
+```
+Default: 30000 (30 seconds)
+Minimum: any positive integer
+```
+
+Increase this value if you are hitting timeouts on large list operations or slow network paths. Decrease it if you want fast failure for latency-sensitive agents.
+
+## Startup validation
+
+`src/auth.ts` reads and validates all four required variables synchronously inside `getAuthConfig()`, which is called by `PaperclipClient`'s constructor before the server accepts any connections:
+
+```typescript
+if (!apiKey)    throw new Error("PAPERCLIP_API_KEY is required");
+if (!apiUrl)    throw new Error("PAPERCLIP_API_URL is required");
+if (!agentId)   throw new Error("PAPERCLIP_AGENT_ID is required");
+if (!companyId) throw new Error("PAPERCLIP_COMPANY_ID is required");
+```
+
+These errors propagate to `main().catch()` in `src/index.ts`, which logs them to stderr and exits with code `1`. Claude Code will show the server as disconnected, and the error message will appear in the MCP server logs.
+
+| Missing variable | Exact error message |
+|---|---|
+| `PAPERCLIP_API_KEY` | `PAPERCLIP_API_KEY is required` |
+| `PAPERCLIP_API_URL` | `PAPERCLIP_API_URL is required` |
+| `PAPERCLIP_AGENT_ID` | `PAPERCLIP_AGENT_ID is required` |
+| `PAPERCLIP_COMPANY_ID` | `PAPERCLIP_COMPANY_ID is required` |
+
+## Verify your configuration
+
+Run this one-liner to confirm all required variables are present in the current shell:
+
+```bash
+node -e "
+const vars = ['PAPERCLIP_API_KEY','PAPERCLIP_API_URL','PAPERCLIP_AGENT_ID','PAPERCLIP_COMPANY_ID'];
+vars.forEach(v => console.log(v, process.env[v] ? 'SET' : 'MISSING'));
+"
+```
+
+For a live connectivity check, confirm the API key is valid against the API:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  "$PAPERCLIP_API_URL/api/agents/me"
+# Expect 200. 401 means the key is wrong or expired.
+```
+
+## Local development .env example
+
+For local development, create a `.env` file in the project root (add it to `.gitignore`). Load it with `dotenv` or `direnv` before starting the server:
+
+```bash
+# .env — local development only, do NOT commit
+PAPERCLIP_API_KEY=pk_agent_your_long_lived_dev_key_here
+PAPERCLIP_API_URL=http://127.0.0.1:3100
+PAPERCLIP_AGENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+PAPERCLIP_COMPANY_ID=yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
+
+# Optional
+# PAPERCLIP_RUN_ID=
+# PAPERCLIP_REQUEST_TIMEOUT_MS=60000
+```
+
+<Tip>
+Generate a long-lived development key from your Paperclip account settings under **Agent Keys** or **Board Keys**. Board keys are required for board-only tools (see the 403 section in Troubleshooting). In production, the Paperclip runtime sets `PAPERCLIP_API_KEY` automatically and you never manage it manually.
+</Tip>

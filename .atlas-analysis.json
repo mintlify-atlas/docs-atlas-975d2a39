@@ -1,0 +1,228 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Paperclip MCP",
+  "projectDescription": "An MCP (Model Context Protocol) server that exposes the Paperclip control plane API as tools for Claude Code agents — enabling autonomous agents to manage issues, coordinate work, post comments, and orchestrate tasks without direct API calls.",
+  "theme": "luma",
+  "primaryColor": "#848484",
+  "lightColor": "#1d1d1d",
+  "darkColor": "#eaeaea",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Installation",
+            "pages": [
+              "installation/overview",
+              "installation/claude-code",
+              "installation/cursor",
+              "installation/vscode",
+              "installation/windsurf",
+              "installation/docker"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/authentication",
+              "guides/issue-lifecycle",
+              "guides/agent-skills",
+              "guides/local-stack"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/error-handling"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/environment-variables",
+              "reference/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tool Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/overview"
+            ]
+          },
+          {
+            "group": "Core",
+            "pages": [
+              "tools/identity",
+              "tools/issues",
+              "tools/comments",
+              "tools/documents"
+            ]
+          },
+          {
+            "group": "Organization",
+            "pages": [
+              "tools/agents",
+              "tools/approvals",
+              "tools/goals",
+              "tools/projects"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "tools/routines",
+              "tools/activity",
+              "tools/runs",
+              "tools/dashboard"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "tools/attachments",
+              "tools/labels",
+              "tools/plugins",
+              "tools/secrets",
+              "tools/company",
+              "tools/feedback",
+              "tools/company-import"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "104 MCP tools covering issues, agents, approvals, goals, projects, routines, and more",
+    "Stdio-based MCP server compatible with Claude Code, Cursor, VS Code, and Windsurf",
+    "Automatic run-scoped JWT injection for all mutating requests via X-Paperclip-Run-Id",
+    "Fail-fast startup validation of all required environment variables",
+    "Docker/Podman support with a hardened Alpine-based image (0 OS-layer CVEs)",
+    "Atomic issue checkout with expectedStatuses guard to prevent race conditions",
+    "Two key types: agent key for autonomous ops, board key for destructive/approval operations",
+    "Pre-built Claude Code skills for triage, epic closure, approvals audit, and release flow",
+    "Structured error responses (isError: true) for all HTTP 4xx/5xx failures",
+    "Compose stack for running the full Paperclip server + MCP server together"
+  ],
+  "publicApiSurface": [
+    "paperclip_get_me",
+    "paperclip_get_inbox",
+    "paperclip_get_current_user",
+    "paperclip_revoke_current_session",
+    "paperclip_list_issues",
+    "paperclip_get_issue",
+    "paperclip_get_heartbeat_context",
+    "paperclip_checkout_issue",
+    "paperclip_release_issue",
+    "paperclip_update_issue",
+    "paperclip_create_issue",
+    "paperclip_list_comments",
+    "paperclip_add_comment",
+    "paperclip_get_comment",
+    "paperclip_list_documents",
+    "paperclip_get_document",
+    "paperclip_upsert_document",
+    "paperclip_delete_document",
+    "paperclip_get_document_revisions",
+    "paperclip_list_agents",
+    "paperclip_create_agent",
+    "paperclip_get_agent",
+    "paperclip_update_agent",
+    "paperclip_update_agent_permissions",
+    "paperclip_pause_agent",
+    "paperclip_resume_agent",
+    "paperclip_invoke_heartbeat",
+    "paperclip_wakeup_agent",
+    "paperclip_terminate_agent",
+    "paperclip_create_agent_key",
+    "paperclip_list_agent_config_revisions",
+    "paperclip_rollback_agent_config",
+    "paperclip_set_agent_instructions_path",
+    "paperclip_get_org_chart",
+    "paperclip_sync_agent_skills",
+    "paperclip_list_company_skills",
+    "paperclip_get_dashboard",
+    "paperclip_list_approvals",
+    "paperclip_get_approval",
+    "paperclip_create_approval",
+    "paperclip_approve",
+    "paperclip_reject",
+    "paperclip_request_revision",
+    "paperclip_resubmit_approval",
+    "paperclip_list_approval_comments",
+    "paperclip_add_approval_comment",
+    "paperclip_list_approval_issues",
+    "paperclip_create_agent_hire",
+    "paperclip_list_goals",
+    "paperclip_get_goal",
+    "paperclip_create_goal",
+    "paperclip_update_goal",
+    "paperclip_list_projects",
+    "paperclip_get_project",
+    "paperclip_create_project",
+    "paperclip_update_project",
+    "paperclip_list_workspaces",
+    "paperclip_create_workspace",
+    "paperclip_update_workspace",
+    "paperclip_delete_workspace",
+    "paperclip_get_activity",
+    "paperclip_get_cost_summary",
+    "paperclip_get_costs_by_agent",
+    "paperclip_get_costs_by_project",
+    "paperclip_report_cost_event",
+    "paperclip_list_routines",
+    "paperclip_get_routine",
+    "paperclip_create_routine",
+    "paperclip_update_routine",
+    "paperclip_add_routine_trigger",
+    "paperclip_update_routine_trigger",
+    "paperclip_delete_routine_trigger",
+    "paperclip_run_routine",
+    "paperclip_list_routine_runs",
+    "paperclip_list_attachments",
+    "paperclip_upload_attachment",
+    "paperclip_download_attachment",
+    "paperclip_delete_attachment",
+    "paperclip_list_labels",
+    "paperclip_create_label",
+    "paperclip_list_companies",
+    "paperclip_create_company",
+    "paperclip_get_company",
+    "paperclip_update_company",
+    "paperclip_archive_company",
+    "paperclip_list_plugins",
+    "paperclip_get_plugin",
+    "paperclip_install_plugin",
+    "paperclip_list_plugin_examples",
+    "paperclip_enable_plugin",
+    "paperclip_disable_plugin",
+    "paperclip_list_secrets",
+    "paperclip_create_secret",
+    "paperclip_update_secret",
+    "paperclip_rotate_secret",
+    "paperclip_list_heartbeat_runs",
+    "paperclip_list_run_events",
+    "paperclip_get_run_log",
+    "paperclip_list_feedback_traces",
+    "paperclip_list_issue_feedback_traces",
+    "paperclip_get_feedback_trace_bundle",
+    "paperclip_export_company",
+    "paperclip_preview_company_import",
+    "paperclip_apply_company_import"
+  ]
+}

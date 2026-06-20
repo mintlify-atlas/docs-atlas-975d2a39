@@ -1,0 +1,348 @@
+---
+title: "Projects tools — organize issues into projects"
+sidebarTitle: "Projects"
+description: "Paperclip project and workspace MCP tools: list, create, update projects and workspaces. Issues belong to projects; workspaces define agent exec paths."
+---
+
+Projects are the primary containers for organising work in Paperclip. Each project groups related issues, links to a strategic goal, and can contain one or more workspaces — execution environments that tell agents where on disk or in a remote repository their work lives. The eight project and workspace tools cover the full lifecycle: discovering projects, creating them linked to goals, updating their status, and managing the workspaces where agents actually execute code.
+
+<Note>
+**Projects, workspaces, and issues.** Issues are assigned to a `projectId` at creation. Workspaces provide the `cwd` (local path) or `repoUrl` (remote repo) an agent uses when executing tasks inside a project. A project can have multiple workspaces — for example, a primary `main` branch workspace and a separate workspace for a feature branch.
+</Note>
+
+---
+
+## paperclip_list_projects
+
+List all projects for the current company with pagination.
+
+<ParamField query="limit" type="integer">
+  Max projects per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of projects to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default, human-readable) or `json` (structured).
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Project[], total, count, offset, limit, has_more, next_offset }`. Each item: `id`, `name`, `status`, `goalId`, `createdAt`.
+
+**Use when:** Finding the `projectId` to link when creating a new issue.  
+**Don't use when:** You need a project's workspaces — use `paperclip_get_project` or `paperclip_list_workspaces` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Permission denied — verify `PAPERCLIP_COMPANY_ID` is correct |
+
+```json
+{
+  "tool": "paperclip_list_projects",
+  "arguments": {
+    "limit": 25,
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_get_project
+
+Get a single project by UUID, including its associated workspaces.
+
+<ParamField query="projectId" type="string" required>
+  Project UUID (e.g. `"prj_abc123"`).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Project object: `id`, `name`, `description`, `status`, `goalId`, `workspaces[]`, `createdAt`.
+
+**Use when:** Reading project details or checking workspace `cwd` before checking out a branch.  
+**Don't use when:** You need a list of projects — use `paperclip_list_projects` to discover IDs first.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Project not found — verify ID with `paperclip_list_projects` |
+
+```json
+{
+  "tool": "paperclip_get_project",
+  "arguments": {
+    "projectId": "prj_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+**Example response (abbreviated):**
+```json
+{
+  "id": "prj_abc123",
+  "name": "API v2 Refactor",
+  "status": "active",
+  "goalId": "gol_xyz789",
+  "workspaces": [
+    {
+      "id": "wsp_111",
+      "cwd": "/home/agents/api-v2",
+      "repoUrl": "https://github.com/org/api",
+      "isPrimary": true
+    }
+  ],
+  "createdAt": "2025-03-01T08:00:00.000Z"
+}
+```
+
+---
+
+## paperclip_create_project
+
+Create a new project. Optionally provision a workspace at the same time by including the `workspace` field.
+
+<ParamField body="name" type="string" required>
+  Project name (non-empty).
+</ParamField>
+<ParamField body="description" type="string">
+  Project description in markdown.
+</ParamField>
+<ParamField body="status" type="string">
+  Initial status (e.g. `"active"`, `"planned"`).
+</ParamField>
+<ParamField body="goalId" type="string">
+  Goal UUID to link this project to. Connects the project to a strategic objective.
+</ParamField>
+<ParamField body="workspace" type="object">
+  Optional workspace config to create alongside the project. Provide at least one of `cwd` (local working directory) or `repoUrl` (remote repository URL).
+</ParamField>
+
+**Returns:** The created project object with all fields, including the assigned UUID and the workspace record if `workspace` was provided.
+
+**Use when:** Setting up a new feature project linked to a goal, with a workspace for agent execution.  
+**Don't use when:** You need to add a workspace to an existing project — use `paperclip_create_workspace` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — ensure `name` is non-empty |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | `goalId` not found — verify with `paperclip_list_goals` |
+
+```json
+{
+  "tool": "paperclip_create_project",
+  "arguments": {
+    "name": "API v2 Refactor",
+    "description": "Migrate the REST API to the new architecture with improved error handling and OpenAPI 3.1 specs.",
+    "status": "active",
+    "goalId": "gol_xyz789",
+    "workspace": {
+      "cwd": "/home/agents/api-v2",
+      "repoUrl": "https://github.com/org/api"
+    }
+  }
+}
+```
+
+---
+
+## paperclip_update_project
+
+Update a project's name, description, or status. Only supplied fields are changed.
+
+<ParamField body="projectId" type="string" required>
+  Project UUID.
+</ParamField>
+<ParamField body="name" type="string">
+  New project name.
+</ParamField>
+<ParamField body="description" type="string">
+  New description in markdown. Replaces the existing description entirely.
+</ParamField>
+<ParamField body="status" type="string">
+  New status (e.g. `"active"`, `"archived"`, `"completed"`).
+</ParamField>
+
+**Returns:** The updated project object with all fields.
+
+**Use when:** Archiving a completed project or renaming it after a scope change.  
+**Don't use when:** You need to update workspace settings — use `paperclip_update_workspace` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Project not found — verify ID with `paperclip_list_projects` |
+
+```json
+{
+  "tool": "paperclip_update_project",
+  "arguments": {
+    "projectId": "prj_abc123",
+    "status": "archived",
+    "description": "Completed and archived after successful v2 launch in June 2025."
+  }
+}
+```
+
+---
+
+## paperclip_list_workspaces
+
+List all workspaces for a specific project.
+
+<ParamField query="projectId" type="string" required>
+  Project UUID.
+</ParamField>
+<ParamField query="limit" type="integer">
+  Max workspaces per page (1–100, default 50).
+</ParamField>
+<ParamField query="offset" type="integer">
+  Number of workspaces to skip (default 0).
+</ParamField>
+<ParamField query="response_format" type="string">
+  Output format: `markdown` (default) or `json`.
+</ParamField>
+
+**Returns:** Pagination envelope `{ items: Workspace[], total, count, offset, limit, has_more, next_offset }`. Each item: `id`, `cwd`, `repoUrl`, `projectId`, `createdAt`.
+
+**Use when:** Finding the workspace `cwd` or `repoUrl` before an agent starts executing in it.  
+**Don't use when:** You need the project record — use `paperclip_get_project` which includes workspaces inline.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Project not found — verify ID with `paperclip_list_projects` |
+
+```json
+{
+  "tool": "paperclip_list_workspaces",
+  "arguments": {
+    "projectId": "prj_abc123",
+    "response_format": "json"
+  }
+}
+```
+
+---
+
+## paperclip_create_workspace
+
+Create a new workspace for an existing project. At least one of `cwd` or `repoUrl` is required.
+
+<ParamField body="projectId" type="string" required>
+  Project UUID.
+</ParamField>
+<ParamField body="cwd" type="string">
+  Local working directory path (e.g. `"/home/agents/api-v2"`). Required if `repoUrl` is not provided.
+</ParamField>
+<ParamField body="repoUrl" type="string">
+  Remote repository URL (e.g. `"https://github.com/org/api"`). Required if `cwd` is not provided.
+</ParamField>
+
+**Returns:** Created workspace object: `{ id, cwd, repoUrl, projectId, createdAt }`.
+
+<Tip>
+If you are creating a project for the first time, pass the `workspace` field directly to `paperclip_create_project` to provision both in a single call. Use `paperclip_create_workspace` only when adding a second workspace (e.g. a feature branch clone) to an existing project.
+</Tip>
+
+**Use when:** Adding a second workspace (e.g. a different branch or clone) to an existing project.  
+**Don't use when:** You are creating a new project — use `paperclip_create_project` with the `workspace` field instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 400 | Validation failure — must provide at least one of `cwd` or `repoUrl` |
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Project not found — verify ID with `paperclip_list_projects` |
+
+```json
+{
+  "tool": "paperclip_create_workspace",
+  "arguments": {
+    "projectId": "prj_abc123",
+    "cwd": "/home/agents/api-v2-feature-branch",
+    "repoUrl": "https://github.com/org/api"
+  }
+}
+```
+
+---
+
+## paperclip_update_workspace
+
+Update a workspace's `cwd` or `repoUrl`. Only supplied fields are changed.
+
+<ParamField body="projectId" type="string" required>
+  Project UUID.
+</ParamField>
+<ParamField body="workspaceId" type="string" required>
+  Workspace UUID.
+</ParamField>
+<ParamField body="cwd" type="string">
+  New local working directory path.
+</ParamField>
+<ParamField body="repoUrl" type="string">
+  New remote repository URL.
+</ParamField>
+
+**Returns:** Updated workspace object: `{ id, cwd, repoUrl, projectId, updatedAt }`.
+
+**Use when:** Updating the workspace path after the repository was moved to a new location.  
+**Don't use when:** You need to create a new workspace — use `paperclip_create_workspace` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 404 | Project or workspace not found — verify IDs with `paperclip_list_workspaces` |
+
+```json
+{
+  "tool": "paperclip_update_workspace",
+  "arguments": {
+    "projectId": "prj_abc123",
+    "workspaceId": "wsp_111",
+    "cwd": "/home/agents/api-v3",
+    "repoUrl": "https://github.com/org/api-v3"
+  }
+}
+```
+
+---
+
+## paperclip_delete_workspace
+
+<Warning>
+**Board-only and irreversible.** Requires a board (human) API key. Deleting a workspace removes it permanently — agents will no longer be able to reference it for task execution. Use `paperclip_update_workspace` if you only want to change its path.
+</Warning>
+
+Permanently delete a workspace from a project.
+
+<ParamField body="projectId" type="string" required>
+  Project UUID.
+</ParamField>
+<ParamField body="workspaceId" type="string" required>
+  Workspace UUID to permanently delete.
+</ParamField>
+
+**Returns:** The deleted workspace object: `{ id, companyId, projectId, name, sourceType, cwd, repoUrl, isPrimary, createdAt, updatedAt }`.
+
+**Use when:** Removing a workspace that is no longer needed (e.g. a closed branch or decommissioned path).  
+**Don't use when:** You want to update workspace settings — use `paperclip_update_workspace` instead.
+
+| HTTP Code | Behavior |
+|-----------|----------|
+| 401 | Authentication failed — check `PAPERCLIP_API_KEY` |
+| 403 | Board key required — this endpoint requires board-level authentication |
+| 404 | Project or workspace not found — verify IDs with `paperclip_list_workspaces` |
+
+```json
+{
+  "tool": "paperclip_delete_workspace",
+  "arguments": {
+    "projectId": "prj_abc123",
+    "workspaceId": "wsp_old999"
+  }
+}
+```

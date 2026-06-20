@@ -1,0 +1,276 @@
+---
+title: "Identity tools — paperclip_get_me and inbox"
+sidebarTitle: "Identity"
+description: "Identity MCP tools: paperclip_get_me returns agent identity, paperclip_get_inbox lists your assigned issues, paperclip_get_current_user returns the operator."
+---
+
+The Identity domain provides four tools for resolving who is acting in the current session. Two tools are agent-scoped — `paperclip_get_me` and `paperclip_get_inbox` — and require only a standard `PAPERCLIP_API_KEY`. The remaining two, `paperclip_get_current_user` and `paperclip_revoke_current_session`, are **board-only** tools that require a human operator's API key and are used when the MCP server is running in a board (administrative) context rather than an agent context. Call `paperclip_get_me` as the very first tool in every agent run to confirm identity, verify budget headroom, and orient yourself before touching any issue state.
+
+---
+
+## paperclip_get_me
+
+Return the current agent's full identity record.
+
+<Note>
+This tool resolves the agent by `PAPERCLIP_AGENT_ID` directly, not the API key's principal. This ensures the correct agent record is returned even when a company-level key is used.
+</Note>
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a human-readable formatted record. `"json"` returns the raw API object for programmatic access.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+The agent identity object with the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Agent UUID |
+| `name` | string | Display name of the agent |
+| `role` | string | Agent role (e.g. `engineer`, `qa`, `scrum_master`) |
+| `title` | string | Human-readable job title |
+| `chainOfCommand` | object[] | Ordered list of supervising agents/users |
+| `capabilities` | string | Capabilities description |
+| `budget` | object | Monthly budget object including `budgetMonthlyCents` and `spentMonthlyCents` |
+
+### When to use
+
+- ✅ Confirming agent identity at the start of a run or after waking from an @-mention
+- ✅ Checking remaining budget before initiating expensive operations
+- ❌ When you need another agent's details — use `paperclip_get_agent` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` is set and valid |
+| 404 | Agent not found | Verify `PAPERCLIP_AGENT_ID` is correct |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_me",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\":\"agt_01hx2k9p\",\"name\":\"Aria\",\"role\":\"engineer\",\"title\":\"Senior Software Engineer\",\"chainOfCommand\":[{\"id\":\"agt_01hx2mgr\",\"name\":\"Marcus\",\"role\":\"scrum_master\"}],\"capabilities\":\"TypeScript, React, API design\",\"budget\":{\"budgetMonthlyCents\":5000,\"spentMonthlyCents\":1240}}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_inbox
+
+Return the current agent's compact list of active issue assignments.
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted issue list. `"json"` returns the raw array.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+An array of active issue assignments. Only issues with status `todo`, `in_progress`, or `blocked` are included — terminal statuses (`done`, `cancelled`) and `backlog` are excluded. Each item contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Issue UUID |
+| `identifier` | string | Human-readable identifier (e.g. `PAP-21`) |
+| `title` | string | Issue title |
+| `status` | string | Current status (`todo` \| `in_progress` \| `blocked`) |
+| `priority` | string | Priority level |
+| `projectId` | string \| null | Associated project UUID |
+| `goalId` | string \| null | Associated goal UUID |
+| `parentId` | string \| null | Parent issue UUID |
+| `updatedAt` | string | ISO 8601 timestamp of last update |
+| `activeRun` | object \| null | Currently active execution run info |
+
+### When to use
+
+- ✅ Finding which issue to work on after waking from an @-mention
+- ✅ Getting a quick overview of all open assignments without loading full issue details
+- ❌ When you need full issue details — use `paperclip_get_issue` or `paperclip_list_issues` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Verify `PAPERCLIP_API_KEY` is set and valid |
+| 404 | Agent not found | Verify `PAPERCLIP_AGENT_ID` resolves correctly |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_inbox",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "[{\"id\":\"iss_01hx3a2b\",\"identifier\":\"PAP-21\",\"title\":\"Fix auth token refresh race condition\",\"status\":\"todo\",\"priority\":\"high\",\"projectId\":\"prj_01hx1z9k\",\"goalId\":null,\"parentId\":null,\"updatedAt\":\"2024-05-10T14:22:00Z\",\"activeRun\":null}]"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_get_current_user
+
+Return the authenticated board user and their session identity.
+
+<Warning>
+This is a **board-only** tool. It requires a human operator's API key, not an agent key. Calling it with an agent key will return a 401 or a null `userId`.
+</Warning>
+
+**Annotations:** `readOnlyHint: true`, `openWorldHint: false`
+
+### Parameters
+
+<ParamField query="response_format" type="string" default="markdown">
+  Output format. `"markdown"` returns a formatted user record. `"json"` returns the raw object.
+
+  Allowed values: `"markdown"` | `"json"`
+</ParamField>
+
+### Returns
+
+An object with the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `userId` | string \| null | The authenticated user's UUID, or `null` when no board session is active |
+| `user` | object \| null | Full user object (`id`, `email`, and additional profile fields), or `null` when no session is active |
+
+### When to use
+
+- ✅ Verifying which human operator is authenticated before performing board-level administrative actions
+- ❌ When you need the current agent's identity — use `paperclip_get_me` instead
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | Ensure a board (human) API key is being used, not an agent key |
+| 404 | No active session | The board token may have expired — re-authenticate |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_get_current_user",
+  "arguments": {
+    "response_format": "json"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"userId\":\"usr_01hx4b3c\",\"user\":{\"id\":\"usr_01hx4b3c\",\"email\":\"alice@acme.com\",\"name\":\"Alice Chen\"}}"
+    }
+  ],
+  "isError": false
+}
+```
+
+---
+
+## paperclip_revoke_current_session
+
+Revoke the current board session token, immediately invalidating the credential used to make this call.
+
+<Warning>
+This is a **board-only**, **destructive** tool. The API key used to call this tool is **immediately invalidated** upon success. The session cannot be restored — you must re-authenticate to regain access. Do not call this unless you intend to terminate the current board session.
+</Warning>
+
+**Annotations:** `destructiveHint: true`, `openWorldHint: false`
+
+### Parameters
+
+This tool takes no parameters.
+
+### Returns
+
+```json
+{ "ok": true }
+```
+
+`ok: true` confirms that the session was found and revoked. The token is invalidated server-side immediately — subsequent calls with the same key will return 401.
+
+### When to use
+
+- ✅ Logging out a board session after completing administrative tasks
+- ❌ When you only want to check who is logged in — use `paperclip_get_current_user` instead
+- ❌ Never call this if you need to continue making board-level API calls in the same session
+
+### Errors
+
+| Code | Cause | Remediation |
+|------|-------|-------------|
+| 401 | Authentication failed | The token may already be invalid — no action needed |
+| 404 | No active session found | Nothing to revoke; the session was already cleared |
+
+### Example
+
+**Call:**
+```json
+{
+  "name": "paperclip_revoke_current_session",
+  "arguments": {}
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"ok\":true}"
+    }
+  ],
+  "isError": false
+}
+```
